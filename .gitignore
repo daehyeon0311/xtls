@@ -1,0 +1,22 @@
+# 계산 결과물 (run_xas.py 가 자동 생성)
+outputs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# 편집기 / 도구
+.spyproject/
+.ipynb_checkpoints/
+.vscode/
+.idea/
+.claude/settings.local.json
+
+# OS
+Thumbs.db
+.DS_Store

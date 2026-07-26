@@ -153,7 +153,7 @@ plot_relative_energy_max = 25.0
 # Optional XTLS overlay.
 
 overlay_xtls = True
-xtls_path = ROOT / "processed" / "Fe_L_spectrum.txt"
+xtls_path = ROOT / "data" / "Fe_L_spectrum.txt"
 xtls_energy_shift = 0.0
 xtls_scale = 1.0
 xtls_iso_column = "iso_broadened"
