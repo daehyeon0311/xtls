@@ -4,7 +4,7 @@ from math import factorial, sqrt
 
 import numpy as np
 
-from .basis import FockBasis
+from .operators import _real_if_close
 
 
 D_ORBITALS = ("xy", "yz", "zx", "x2-y2", "3z2-r2")
@@ -22,36 +22,21 @@ def p_spin_orbital_labels() -> tuple[str, ...]:
     return tuple(f"{orb}_{spin}" for orb in P_ORBITALS for spin in SPINS)
 
 
-def pd_spin_orbital_labels() -> tuple[str, ...]:
-    """Return labels for a combined 2p + 3d shell orbital space."""
-    return p_spin_orbital_labels() + d_spin_orbital_labels()
+def _spin_expand_matrix(orbital_matrix: np.ndarray) -> np.ndarray:
+    """Expand an `(n,n)` orbital matrix into `(2n,2n)` spin-orbital form.
 
-
-def d_shell_basis(n_d_electrons: int) -> FockBasis:
-    """Return fixed-N basis for a spinful d shell."""
-    return FockBasis.fixed_n(n_orbitals=10, n_electrons=n_d_electrons)
-
-
-def pd_xas_initial_basis(n_d_electrons: int) -> FockBasis:
-    """Return the `2p^6 3d^n` basis in a combined p+d orbital space."""
-    if not 0 <= n_d_electrons <= 10:
-        raise ValueError("n_d_electrons must satisfy 0 <= n <= 10")
-    states = []
-    p_full = (1 << 6) - 1
-    for d_state in FockBasis.fixed_n(10, n_d_electrons).states:
-        states.append(p_full | (d_state << 6))
-    return FockBasis.from_states(16, 6 + n_d_electrons, states)
-
-
-def pd_xas_final_basis(n_d_electrons: int) -> FockBasis:
-    """Return the `2p^5 3d^(n+1)` basis in a combined p+d orbital space."""
-    if not 0 <= n_d_electrons <= 9:
-        raise ValueError("n_d_electrons must satisfy 0 <= n <= 9 for XAS final states")
-    states = []
-    for p_state in FockBasis.fixed_n(6, 5).states:
-        for d_state in FockBasis.fixed_n(10, n_d_electrons + 1).states:
-            states.append(p_state | (d_state << 6))
-    return FockBasis.from_states(16, 6 + n_d_electrons, states)
+    Spin is the fast index, so orbital `a` occupies spin-orbitals `2a` (down)
+    and `2a+1` (up). The operator is spin-diagonal.
+    """
+    n_orbitals = orbital_matrix.shape[0]
+    spin_matrix = np.zeros(
+        (2 * n_orbitals, 2 * n_orbitals),
+        dtype=np.result_type(orbital_matrix, complex),
+    )
+    blocks = spin_matrix.reshape(n_orbitals, 2, n_orbitals, 2)
+    for spin in range(2):
+        blocks[:, spin, :, spin] = orbital_matrix
+    return spin_matrix
 
 
 def spin_expand_orbital_matrix(orbital_matrix: np.ndarray) -> np.ndarray:
@@ -63,14 +48,7 @@ def spin_expand_orbital_matrix(orbital_matrix: np.ndarray) -> np.ndarray:
     orbital_matrix = np.asarray(orbital_matrix)
     if orbital_matrix.shape != (5, 5):
         raise ValueError("orbital_matrix must have shape (5, 5)")
-    spin_matrix = np.zeros((10, 10), dtype=np.result_type(orbital_matrix, complex))
-    for orbital_i in range(5):
-        for orbital_j in range(5):
-            for spin in range(2):
-                spin_matrix[2 * orbital_i + spin, 2 * orbital_j + spin] = orbital_matrix[
-                    orbital_i, orbital_j
-                ]
-    return _real_if_close(spin_matrix)
+    return _real_if_close(_spin_expand_matrix(orbital_matrix))
 
 
 def d_angular_momentum_matrices() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -90,7 +68,7 @@ def d_angular_momentum_matrices() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     lx_sph = (lp_sph + lm_sph) / 2
     ly_sph = (lp_sph - lm_sph) / (2j)
 
-    transform = _spherical_to_cubic_transform()
+    transform = spherical_to_cubic_transform()
     lx = transform @ lx_sph @ transform.conjugate().T
     ly = transform @ ly_sph @ transform.conjugate().T
     lz = transform @ lz_sph @ transform.conjugate().T
@@ -152,83 +130,7 @@ def pd_l_edge_dipole_matrix(polarization: str = "z") -> np.ndarray:
     p_to_d = _p_to_d_orbital_dipole_matrix(polarization)
     orbital[3:8, 0:3] = p_to_d
 
-    spin_matrix = np.zeros((16, 16), dtype=complex)
-    for orbital_i in range(8):
-        for orbital_j in range(8):
-            for spin in range(2):
-                spin_matrix[2 * orbital_i + spin, 2 * orbital_j + spin] = orbital[
-                    orbital_i,
-                    orbital_j,
-                ]
-    return _real_if_close(spin_matrix)
-
-
-def d_shell_kanamori_tensor(u: float, j_hund: float, n_orbitals: int = 5) -> np.ndarray:
-    """Return a spin-orbital Coulomb tensor for a d-shell Kanamori model.
-
-    The spin-orbital order is the same as `d_spin_orbital_labels`: each orbital
-    has `down, up` spin channels. The tensor can be passed directly to
-    `two_body_matrix`.
-
-    Parameters
-    ----------
-    u:
-        Intra-orbital Coulomb repulsion.
-    j_hund:
-        Hund exchange. The inter-orbital direct term is `u - 2*j_hund`.
-    n_orbitals:
-        Number of spatial orbitals. The d shell uses 5.
-    """
-    if n_orbitals <= 0:
-        raise ValueError("n_orbitals must be positive")
-    u_prime = u - 2.0 * j_hund
-    orbital_tensor = np.zeros((n_orbitals, n_orbitals, n_orbitals, n_orbitals), dtype=float)
-
-    for a in range(n_orbitals):
-        orbital_tensor[a, a, a, a] = u
-        for b in range(n_orbitals):
-            if a == b:
-                continue
-            orbital_tensor[a, b, a, b] = u_prime
-            orbital_tensor[a, b, b, a] = j_hund
-
-    n_spin_orbitals = 2 * n_orbitals
-    tensor = np.zeros(
-        (n_spin_orbitals, n_spin_orbitals, n_spin_orbitals, n_spin_orbitals),
-        dtype=float,
-    )
-    for p in range(n_spin_orbitals):
-        a, spin_p = divmod(p, 2)
-        for q in range(n_spin_orbitals):
-            b, spin_q = divmod(q, 2)
-            for r in range(n_spin_orbitals):
-                c, spin_r = divmod(r, 2)
-                if spin_p != spin_r:
-                    continue
-                for s in range(n_spin_orbitals):
-                    d, spin_s = divmod(s, 2)
-                    if spin_q == spin_s:
-                        tensor[p, q, r, s] = orbital_tensor[a, b, c, d]
-    return tensor
-
-
-def d_shell_slater_to_kanamori(f0: float, f2: float, f4: float) -> tuple[float, float]:
-    """Convert d-shell Slater integrals to average Kanamori U and J.
-
-    This is the common spherical-average reduction:
-    `U = F0 + 4/49 * (F2 + F4)` and `J = (F2 + F4) / 14`.
-    It is useful for a compact interacting solver while the full anisotropic
-    Slater tensor is being built.
-    """
-    u = f0 + 4.0 * (f2 + f4) / 49.0
-    j_hund = (f2 + f4) / 14.0
-    return u, j_hund
-
-
-def d_shell_slater_kanamori_tensor(f0: float, f2: float, f4: float) -> np.ndarray:
-    """Return a d-shell Kanamori tensor parameterized by Slater integrals."""
-    u, j_hund = d_shell_slater_to_kanamori(f0, f2, f4)
-    return d_shell_kanamori_tensor(u, j_hund)
+    return _real_if_close(_spin_expand_matrix(orbital))
 
 
 def slater_spherical_orbital_tensor(
@@ -282,18 +184,12 @@ def orbital_tensor_to_spin_orbital(orbital_tensor: np.ndarray) -> np.ndarray:
         (n_spin_orbitals, n_spin_orbitals, n_spin_orbitals, n_spin_orbitals),
         dtype=np.result_type(orbital_tensor, complex),
     )
-    for p in range(n_spin_orbitals):
-        a, spin_p = divmod(p, 2)
-        for q in range(n_spin_orbitals):
-            b, spin_q = divmod(q, 2)
-            for r in range(n_spin_orbitals):
-                c, spin_r = divmod(r, 2)
-                if spin_p != spin_r:
-                    continue
-                for s in range(n_spin_orbitals):
-                    d, spin_s = divmod(s, 2)
-                    if spin_q == spin_s:
-                        tensor[p, q, r, s] = orbital_tensor[a, b, c, d]
+    # `c_i^dag c_j^dag c_l c_k` conserves spin along both the (i,k) and (j,l)
+    # pairs, so only the two spin-diagonal blocks are populated.
+    blocks = tensor.reshape((n_orbitals, 2) * 4)
+    for spin_ik in range(2):
+        for spin_jl in range(2):
+            blocks[:, spin_ik, :, spin_jl, :, spin_ik, :, spin_jl] = orbital_tensor
     return _real_if_close(tensor)
 
 
@@ -322,7 +218,7 @@ def d_shell_slater_tensor(f0: float, f2: float, f4: float, cubic: bool = True) -
     """Return the full anisotropic d-shell spin-orbital Slater tensor."""
     orbital_tensor = slater_spherical_orbital_tensor(2, {0: f0, 2: f2, 4: f4})
     if cubic:
-        orbital_tensor = transform_orbital_tensor(orbital_tensor, _spherical_to_cubic_transform())
+        orbital_tensor = transform_orbital_tensor(orbital_tensor, spherical_to_cubic_transform())
     return orbital_tensor_to_spin_orbital(orbital_tensor)
 
 
@@ -352,7 +248,7 @@ def pd_shell_slater_tensor(
 
     transform = np.zeros((8, 8), dtype=complex)
     transform[0:3, 0:3] = _spherical_to_p_cubic_transform()
-    transform[3:8, 3:8] = _spherical_to_cubic_transform()
+    transform[3:8, 3:8] = spherical_to_cubic_transform()
     cubic = transform_orbital_tensor(spherical, transform)
     return orbital_tensor_to_spin_orbital(cubic)
 
@@ -518,7 +414,7 @@ def _p_to_d_orbital_dipole_matrix(polarization: str) -> np.ndarray:
                     mp,
                 )
 
-    d_transform = _spherical_to_cubic_transform()
+    d_transform = spherical_to_cubic_transform()
     p_transform = _spherical_to_p_cubic_transform()
     cubic = d_transform @ spherical @ p_transform.conjugate().T
     return _real_if_close(cubic)
@@ -572,7 +468,7 @@ def _wigner_3j(
     return phase * norm * total
 
 
-def _spherical_to_cubic_transform() -> np.ndarray:
+def spherical_to_cubic_transform() -> np.ndarray:
     return np.array(
         [
             [1j / np.sqrt(2), 0, 0, 0, -1j / np.sqrt(2)],
@@ -594,9 +490,3 @@ def _spherical_to_p_cubic_transform() -> np.ndarray:
         ],
         dtype=complex,
     )
-
-
-def _real_if_close(matrix: np.ndarray) -> np.ndarray:
-    if np.allclose(matrix.imag, 0):
-        return matrix.real
-    return matrix

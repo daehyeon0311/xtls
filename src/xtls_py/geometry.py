@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from .engine.shells import spherical_to_cubic_transform
+
 
 def crystal_field(
     positions_sph: np.ndarray,
@@ -142,16 +144,7 @@ def crystal_field(
     h_cry = norm * h_cry
     e_cry = norm * e_cry
 
-    transform = np.array(
-        [
-            [1j / np.sqrt(2), 0, 0, 0, -1j / np.sqrt(2)],
-            [0, 1j / np.sqrt(2), 0, 1j / np.sqrt(2), 0],
-            [0, 1 / np.sqrt(2), 0, -1 / np.sqrt(2), 0],
-            [1 / np.sqrt(2), 0, 0, 0, 1 / np.sqrt(2)],
-            [0, 0, 1, 0, 0],
-        ],
-        dtype=complex,
-    )
+    transform = spherical_to_cubic_transform()
     h_cry_xyz = transform @ h_cry @ transform.conjugate().T
     qkm_tanaka = norm * np.vstack([qkm[0, :] * 1, qkm[1, :] * r2, qkm[2, :] * r4])
     return h_cry_xyz, h_cry, e_cry, qkm_tanaka

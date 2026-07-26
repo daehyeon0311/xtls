@@ -42,6 +42,7 @@ from xtls_py.engine import (  # noqa: E402
     p_ct_xas_initial_basis,
     p_spin_orbit_matrix,
     pd_shell_slater_tensor,
+    sector_energy,
     spin_matrices,
     spin_expand_orbital_matrix,
     two_body_sparse,
@@ -81,7 +82,7 @@ def main() -> None:
         print("estimate_only=True, skipping Lanczos calculation.")
         return
 
-    output_dir.mkdir(exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     display_energy, curves, metadata = calculate_spectrum()
     effective_max_ligand_holes = int(metadata["effective_max_ligand_holes"])
 
@@ -443,8 +444,9 @@ def calculate_spectrum() -> tuple[np.ndarray, dict[str, np.ndarray], dict[str, o
     v_initial_spectrum = v_initial[:, :n_spectrum_states]
     weights = _thermal_weights(e_initial_spectrum, temperature_kelvin)
     e_final_analysis, v_final_analysis = lowest_eigenpairs(h_final, k=max(1, n_analyzed_states))
-    e_final_ground, _ = lowest_eigenpairs(h_final, k=1)
-    onset = float(e_final_ground[0] - e_initial[0])
+    # `lowest_eigenpairs` returns ascending eigenvalues, so the first analyzed
+    # final state is already the final-state ground state.
+    onset = float(e_final_analysis[0] - e_initial[0])
     relative_energy = _energy_grid()
     transition_energy = onset + relative_energy
     display_energy = relative_energy + energy_shift
@@ -503,7 +505,7 @@ def calculate_spectrum() -> tuple[np.ndarray, dict[str, np.ndarray], dict[str, o
         "initial_basis_size": float(len(initial_basis)),
         "final_basis_size": float(len(final_basis)),
         "initial_ground_energy": float(e_initial[0]),
-        "final_ground_energy": float(e_final_ground[0]),
+        "final_ground_energy": float(e_final_analysis[0]),
         "onset": float(onset),
         "requested_max_ligand_holes": int(max_ligand_holes),
         "effective_max_ligand_holes": int(effective_max_ligand_holes),
@@ -571,7 +573,7 @@ def _build_initial_hamiltonian(basis, h_crystal, h_hybridization, slater_by_hole
         hamiltonian = hamiltonian + _embed_sector_matrix(
             basis,
             sector_basis,
-            two_body_sparse(sector_basis, _pad_pd_tensor_to_pct(v_pd)),
+            two_body_sparse(sector_basis, v_pd),
         )
     return hamiltonian
 
@@ -611,15 +613,9 @@ def _build_final_hamiltonian(basis, h_crystal, h_hybridization, slater_by_hole):
         hamiltonian = hamiltonian + _embed_sector_matrix(
             basis,
             sector_basis,
-            two_body_sparse(sector_basis, _pad_pd_tensor_to_pct(v_pd)),
+            two_body_sparse(sector_basis, v_pd),
         )
     return hamiltonian
-
-
-def _pad_pd_tensor_to_pct(v_pd):
-    v = np.zeros((26, 26, 26, 26), dtype=np.result_type(v_pd, complex))
-    v[0:16, 0:16, 0:16, 0:16] = v_pd
-    return v
 
 
 def _configuration_slater_entries(p_electrons: int, first_d: int, max_holes: int):
@@ -933,9 +929,13 @@ def _configuration_energy_rows(max_holes: int) -> list[dict[str, object]]:
 
 
 def _configuration_energy(holes: int, core_holes: int) -> float:
-    if core_holes:
-        return holes * delta + holes * (holes + 1) * u_charge_transfer / 2.0 - holes * core_hole_potential
-    return holes * delta + holes * (holes - 1) * u_charge_transfer / 2.0
+    return sector_energy(
+        ligand_holes=holes,
+        core_holes=core_holes,
+        delta=delta,
+        u_charge_transfer=u_charge_transfer,
+        core_hole_potential=core_hole_potential,
+    )
 
 
 def _configuration_label(p_electrons: int, d_electrons: int, holes: int) -> str:

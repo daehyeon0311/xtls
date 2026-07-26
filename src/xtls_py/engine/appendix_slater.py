@@ -360,15 +360,6 @@ def _get_entry(
         raise KeyError(f"No Appendix-A {label} entry for {key}.{hint}") from exc
 
 
-def xas_appendix_pair(element: str, n_d_electrons: int) -> tuple[SlaterEntry, SlaterEntry]:
-    """Return Appendix-A initial/final entries for `2p6 3d^n -> 2p5 3d^(n+1)`."""
-    initial = get_appendix_a_3d(element, 6, n_d_electrons)
-    final = get_appendix_a_3d(element, 5, n_d_electrons + 1)
-    if final.zeta_2p is None or final.fpd2 is None or final.gpd1 is None or final.gpd3 is None:
-        raise ValueError("Final-state entry does not contain p-d Slater integrals")
-    return initial, final
-
-
 def _entry_key(element: str, p_electrons: int, d_electrons: int) -> tuple[str, int, int]:
     return (element.capitalize(), p_electrons, d_electrons)
 

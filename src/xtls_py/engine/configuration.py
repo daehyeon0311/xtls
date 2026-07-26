@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 from .basis import FockBasis
@@ -70,29 +69,6 @@ class Configuration:
         return " ".join(pieces)
 
 
-def parse_configuration(text: str) -> Configuration:
-    """Parse compact XTLS-like labels such as `2p6 3d6` or `2p5 3d8L2`."""
-
-    normalized = text.strip().replace("^", "")
-    if not normalized:
-        raise ValueError("configuration string is empty")
-    p_match = re.search(r"(?<![A-Za-z0-9])2p\s*(\d+)(?!\d)", normalized, flags=re.IGNORECASE)
-    d_match = re.search(r"(?<![A-Za-z0-9])3d\s*(\d+)(?!\d)", normalized, flags=re.IGNORECASE)
-    ligand_match = re.search(r"(?<![A-Za-z0-9])L\s*(\d*)(?!\d)", normalized, flags=re.IGNORECASE)
-    if ligand_match is None:
-        ligand_match = re.search(r"(?<=\d)L\s*(\d*)(?!\d)", normalized, flags=re.IGNORECASE)
-    if d_match is None:
-        raise ValueError(f"configuration must contain a 3d electron count: {text!r}")
-    ligand_holes = 0
-    if ligand_match is not None:
-        ligand_holes = int(ligand_match.group(1) or "1")
-    return Configuration(
-        p_electrons=None if p_match is None else int(p_match.group(1)),
-        d_electrons=int(d_match.group(1)),
-        ligand_holes=ligand_holes,
-    )
-
-
 def xas_initial_configurations(
     n_d_electrons: int,
     max_ligand_holes: int = 1,
@@ -127,20 +103,6 @@ def xas_final_configurations(
             d_electrons=n_d_electrons + 1 + holes,
             ligand_holes=holes,
         )
-        for holes in range(max_holes + 1)
-    )
-
-
-def charge_transfer_configurations(
-    n_d_electrons: int,
-    max_ligand_holes: int = 2,
-) -> tuple[Configuration, ...]:
-    """Return valence-only `3d^n + 3d^(n+1)L + ...` sectors."""
-
-    _validate_hole_request(n_d_electrons, max_ligand_holes)
-    max_holes = min(max_ligand_holes, _D_SPIN_ORBITALS - n_d_electrons)
-    return tuple(
-        Configuration(d_electrons=n_d_electrons + holes, ligand_holes=holes)
         for holes in range(max_holes + 1)
     )
 
@@ -190,23 +152,28 @@ def configuration_states(config: Configuration) -> tuple[int, ...]:
     return tuple(states)
 
 
-def configuration_energy(
-    config: Configuration,
+def sector_energy(
+    ligand_holes: int,
+    core_holes: int,
     delta: float,
     u_charge_transfer: float = 0.0,
     core_hole_potential: float = 0.0,
 ) -> float:
-    """Simple diagonal sector energy used by the current XAS/XLD solver.
+    """Diagonal energy of one charge-transfer sector.
+
+    This is the single definition of the sector energy used everywhere: by the
+    diagonal of the many-body Hamiltonian, and by the configuration-energy
+    table written to the output files.
 
     Without a core hole this gives `0`, `Delta`, `2Delta + Udd`, ...
     for `L0`, `L1`, `L2`, ... sectors. With one 2p core hole this gives
     `0`, `Delta + Udd - Upd`, `2Delta + 3Udd - 2Upd`, ... .
     """
 
-    holes = config.ligand_holes
-    if config.core_holes:
+    holes = ligand_holes
+    if core_holes:
         energy = holes * delta + holes * (holes + 1) * u_charge_transfer / 2.0
-        energy -= config.core_holes * holes * core_hole_potential
+        energy -= core_holes * holes * core_hole_potential
     else:
         energy = holes * delta + holes * (holes - 1) * u_charge_transfer / 2.0
     return float(energy)
