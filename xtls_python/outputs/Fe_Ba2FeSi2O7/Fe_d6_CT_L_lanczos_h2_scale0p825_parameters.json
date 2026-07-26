@@ -1,0 +1,254 @@
+{
+  "configuration_energies": [
+    {
+      "configuration": "2p6 3d6",
+      "energy_eV": 0.0,
+      "label": "#i1",
+      "state": "initial"
+    },
+    {
+      "configuration": "2p6 3d7 L",
+      "energy_eV": 5.5,
+      "label": "#i2",
+      "state": "initial"
+    },
+    {
+      "configuration": "2p6 3d8 L2",
+      "energy_eV": 15.25,
+      "label": "#i3",
+      "state": "initial"
+    },
+    {
+      "configuration": "2p5 3d7",
+      "energy_eV": 0.0,
+      "label": "#f1",
+      "state": "final"
+    },
+    {
+      "configuration": "2p5 3d8 L",
+      "energy_eV": 4.0,
+      "label": "#f2",
+      "state": "final"
+    },
+    {
+      "configuration": "2p5 3d9 L2",
+      "energy_eV": 12.25,
+      "label": "#f3",
+      "state": "final"
+    }
+  ],
+  "coordination_geometry": "tetrahedral",
+  "core_hole_potential": 5.75,
+  "d_ref": 2.0,
+  "delta": 5.5,
+  "effective_max_ligand_holes": 2,
+  "element": "Fe",
+  "energy_max": 20.0,
+  "energy_min": -20.0,
+  "energy_shift": 0.0,
+  "energy_step": 0.01,
+  "estimate_only": false,
+  "fdd2_scale": 0.825,
+  "fdd4_scale": 0.825,
+  "final_slater": {
+    "0": {
+      "d_electrons": 7,
+      "element": "Fe",
+      "fdd2": 9.716849999999999,
+      "fdd4": 6.044775,
+      "fpd2": 5.6034,
+      "gpd1": 4.125,
+      "gpd3": 2.345475,
+      "p_electrons": 5,
+      "r2": 0.351,
+      "r4": 0.292,
+      "zeta_2p": 8.2,
+      "zeta_d": 0.067
+    },
+    "1": {
+      "d_electrons": 8,
+      "element": "Fe",
+      "fdd2": 8.76315,
+      "fdd4": 5.411175,
+      "fpd2": 5.06715,
+      "gpd1": 3.681975,
+      "gpd3": 2.093025,
+      "p_electrons": 5,
+      "r2": 0.438,
+      "r4": 0.527,
+      "zeta_2p": 8.202,
+      "zeta_d": 0.059
+    },
+    "2": {
+      "d_electrons": 9,
+      "element": "Fe",
+      "fdd2": 7.666724999999999,
+      "fdd4": 4.6926,
+      "fpd2": 4.53585,
+      "gpd1": 3.264525,
+      "gpd3": 1.8546,
+      "p_electrons": 5,
+      "r2": 0.62,
+      "r4": 1.452,
+      "zeta_2p": 8.203,
+      "zeta_d": 0.053
+    }
+  },
+  "fpd2_scale": 0.825,
+  "gaussian_hwhm": 0.22,
+  "gaussian_hwhm_points": [],
+  "gaussian_sigma": 0.0,
+  "gpd1_scale": 0.825,
+  "gpd3_scale": 0.825,
+  "grazing_angle_deg": 23.5,
+  "hopping": 0.8,
+  "hybridization_mode": "geometry",
+  "initial_slater": {
+    "0": {
+      "d_electrons": 6,
+      "element": "Fe",
+      "fdd2": 9.046125,
+      "fdd4": 5.622375,
+      "fpd2": null,
+      "gpd1": null,
+      "gpd3": null,
+      "p_electrons": 6,
+      "r2": 0.402,
+      "r4": 0.38,
+      "zeta_2p": null,
+      "zeta_d": 0.052
+    },
+    "1": {
+      "d_electrons": 7,
+      "element": "Fe",
+      "fdd2": 8.052824999999999,
+      "fdd4": 4.964025,
+      "fpd2": null,
+      "gpd1": null,
+      "gpd3": null,
+      "p_electrons": 6,
+      "r2": 0.515,
+      "r4": 0.723,
+      "zeta_2p": null,
+      "zeta_d": 0.045
+    },
+    "2": {
+      "d_electrons": 8,
+      "element": "Fe",
+      "fdd2": 1.721775,
+      "fdd4": 1.051875,
+      "fpd2": null,
+      "gpd1": null,
+      "gpd3": null,
+      "p_electrons": 6,
+      "r2": null,
+      "r4": null,
+      "zeta_2p": null,
+      "zeta_d": 0.021
+    }
+  },
+  "inplane_curve": "ab",
+  "input_file": "C:\\Users\\allur\\OneDrive\\codex\\xtls_python\\inputs\\Fe_Ba2FeSi2O7.py",
+  "ligand_angle_offset_deg": 7.8353,
+  "ligand_hole_truncation_reason": "none",
+  "ligand_positions_spherical": null,
+  "ligand_positions_xyz": null,
+  "ligand_radius": 1.99626,
+  "lorentzian_hwhm": 0.2,
+  "lorentzian_hwhm_points": [
+    [
+      -3.0,
+      0.2
+    ],
+    [
+      10.0,
+      0.35
+    ]
+  ],
+  "make_experimental_geometry_curves": true,
+  "max_ligand_holes": 2,
+  "metadata": {
+    "analyzed_states": 10,
+    "broadening": {
+      "energy_max": 20.0,
+      "energy_min": -20.0,
+      "gaussian_hwhm_equivalent": {
+        "energy_dependent": false,
+        "max": 0.22,
+        "mean": 0.22,
+        "min": 0.22
+      },
+      "gaussian_hwhm_points": [],
+      "gaussian_sigma": {
+        "energy_dependent": false,
+        "max": 0.1868507960633642,
+        "mean": 0.1868507960633642,
+        "min": 0.1868507960633642
+      },
+      "lorentzian_hwhm": {
+        "energy_dependent": true,
+        "max": 0.35,
+        "mean": 0.26187828042989253,
+        "min": 0.2
+      },
+      "lorentzian_hwhm_points": [
+        [
+          -3.0,
+          0.2
+        ],
+        [
+          10.0,
+          0.35
+        ]
+      ]
+    },
+    "effective_max_ligand_holes": 2,
+    "experimental_geometry": {
+      "enabled": true,
+      "formula": "I_pi_grazing = sin(angle)^2 * I_inplane + cos(angle)^2 * I_c",
+      "grazing_angle_definition": "beam angle from sample ab plane",
+      "grazing_angle_deg": 23.5,
+      "inplane_curve": "ab",
+      "ld_formula": "LD_grazing = I_inplane - I_pi_grazing",
+      "pi_inplane_weight": 0.15900081996875073,
+      "pi_outofplane_weight": 0.8409991800312493,
+      "pi_polarization": "E in incidence plane; mixed in-plane and c channel",
+      "sigma_polarization": "E//ab; pure in-plane channel"
+    },
+    "final_basis_size": 6120.0,
+    "final_ground_energy": -34.31389103685925,
+    "hybridization_mode": "geometry",
+    "initial_basis_size": 3435.0,
+    "initial_ground_energy": -12.51926064903643,
+    "initial_states": 10,
+    "ligand_hole_truncation_reason": "none",
+    "onset": -21.79463038782282,
+    "requested_max_ligand_holes": 2
+  },
+  "n_analyzed_states": 10,
+  "n_d_electrons": 6,
+  "n_initial_states": 10,
+  "n_recursion": 500,
+  "normalize": "max",
+  "overlay_xtls": true,
+  "pd_ratio": -2.0,
+  "pd_sigma": -1.5,
+  "plot_absolute_energy_offset": 707.0,
+  "plot_relative_energy_max": 25.0,
+  "plot_relative_energy_min": -5.0,
+  "plot_use_absolute_energy": true,
+  "r2": 0.402,
+  "r4": 0.38,
+  "requested_max_ligand_holes": 2,
+  "save_state_analysis": true,
+  "so2p_scale": 1.0,
+  "so3d_scale": 1.0,
+  "spectrum_method": "exact",
+  "temperature_kelvin": 370.0,
+  "ten_dq": 0.3,
+  "u_charge_transfer": 4.25,
+  "xtls_energy_shift": 0.0,
+  "xtls_iso_column": "iso_broadened",
+  "xtls_path": "C:\\Users\\allur\\OneDrive\\codex\\xtls_python\\processed\\Fe_L_spectrum.txt",
+  "xtls_scale": 1.0
+}

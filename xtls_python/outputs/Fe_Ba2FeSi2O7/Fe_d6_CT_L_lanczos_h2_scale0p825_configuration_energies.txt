@@ -1,0 +1,7 @@
+label state configuration energy_eV
+#i1 initial "2p6 3d6" 0
+#i2 initial "2p6 3d7 L" 5.5
+#i3 initial "2p6 3d8 L2" 15.25
+#f1 final "2p5 3d7" 0
+#f2 final "2p5 3d8 L" 4
+#f3 final "2p5 3d9 L2" 12.25
