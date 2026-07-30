@@ -20,3 +20,6 @@ venv/
 # OS
 Thumbs.db
 .DS_Store
+
+# Streamlit
+.streamlit/
