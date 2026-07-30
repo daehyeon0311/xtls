@@ -1,280 +1,286 @@
-"""Interactive front end for the charge-transfer cluster calculations.
+"""Input-card builder for the charge-transfer cluster calculations.
 
     streamlit run app.py
 
-Drag a parameter, watch the spectrum move. The point is fitting: pin curves to
-compare, overlay measured data to see the residual, and show XAS and XPS side
-by side so one parameter set has to satisfy both. When a set looks right,
-export it back to an input file so `run.py` reproduces it at full quality.
+This writes input files; it does not run spectra. Every number shown updates
+instantly because nothing here diagonalizes anything -- the panels are basis
+sizes from binomial coefficients, sector energies from a closed formula, a 5x5
+crystal-field matrix, and a table lookup. Set the parameters, save the card,
+then run the calculation from the command line:
 
-Nothing here reimplements the physics -- it drives `run_xas.calculate_spectrum`
-and `run_xps.calculate_spectrum` directly, so the curves shown are the same
-ones the command-line runners produce.
+    python run.py inputs/<name>.py both
+
+Loading an existing file as the starting point keeps its comments: only the
+values you changed are substituted back in.
 """
 
 from __future__ import annotations
 
-import io
-import json
 import re
 import sys
+from math import comb
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 import streamlit as st
 
 
 ROOT = Path(__file__).resolve().parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+SRC = ROOT / "src"
+for path in (ROOT, SRC):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
+
+from xtls_py.engine import (  # noqa: E402
+    available_appendix_a_3d,
+    get_appendix_a_3d,
+    sector_energy,
+)
+from xtls_py.geometry import crystal_field  # noqa: E402
 
 
-def _configure_font() -> None:
-    """Pick a font that can draw the Korean plot labels.
+D_ELECTRON_GROUP = {
+    "K": 1, "Ca": 2, "Sc": 3, "Ti": 4, "V": 5, "Cr": 6,
+    "Mn": 7, "Fe": 8, "Co": 9, "Ni": 10, "Cu": 11, "Zn": 12,
+}
 
-    matplotlib's default has no Hangul glyphs, so legends render as tofu boxes.
-    Falling through the list leaves the default in place, which still draws the
-    curves correctly.
-    """
-    from matplotlib import font_manager
+GEOMETRIES = (
+    "tetrahedral",
+    "octahedral",
+    "square_planar",
+    "square_pyramidal",
+    "trigonal_bipyramidal",
+    "custom_xyz",
+    "custom_spherical",
+)
 
-    available = {font.name for font in font_manager.fontManager.ttflist}
-    for name in ("Malgun Gothic", "AppleGothic", "NanumGothic", "Noto Sans CJK KR", "Noto Sans KR"):
-        if name in available:
-            plt.rcParams["font.family"] = name
-            break
-    # Hangul fonts often lack U+2212, so keep the ASCII hyphen for minus signs.
-    plt.rcParams["axes.unicode_minus"] = False
-
-
-_configure_font()
+D_ORBITAL_LABELS = ("xy", "yz", "zx", "x²-y²", "3z²-r²")
 
 
 # ---------------------------------------------------------------------------
-# Quality presets.
+# Parameter definitions.
 #
-# Exploring at h=1 on a coarse grid takes a few seconds, which is fast enough
-# to drag a slider against. The final pass uses whatever the input file says.
+# Each entry is (key, widget, label, options). `options` carries the widget's
+# bounds or choices. Everything is rendered from this table, and the resulting
+# values are what get substituted into the input card.
 
-QUALITY_PRESETS = {
-    "탐색 (h=1, 거친 격자)": {
-        "max_ligand_holes": 1,
-        "n_recursion": 200,
-        "energy_step": 0.05,
-        "n_initial_states": 3,
-        "n_analyzed_states": 3,
-    },
-    "중간 (h=1, 세밀)": {
-        "max_ligand_holes": 1,
-        "n_recursion": 300,
-        "energy_step": 0.02,
-        "n_initial_states": 10,
-        "n_analyzed_states": 5,
-    },
-    "최종 (입력 파일 그대로)": {},
+FIELDS: dict[str, list[tuple]] = {
+    "기본": [
+        ("case_name", "text", "케이스 이름", {}),
+        ("ion", "text", "이온 (예: Fe2+)", {"help": "element, d 전자수, 출력 경로, 플롯 오프셋이 자동으로 정해집니다."}),
+        ("max_ligand_holes", "int", "최대 ligand hole 수", {"min": 0, "max": 4}),
+    ],
+    "클러스터": [
+        ("delta", "number", "Δ  전하이동 에너지 (eV)", {"step": 0.1}),
+        ("u_charge_transfer", "number", "U_dd  d-d 쿨롱 (eV)", {"step": 0.1}),
+        ("core_hole_potential", "number", "U_dc  core hole 인력 (eV)", {"step": 0.1}),
+        ("ten_dq", "number", "10Dq  결정장 (eV)", {"step": 0.01}),
+        ("ligand_ten_dq", "number", "10Dq(L)  리간드 분열 (eV)", {"step": 0.01, "help": "XTLS `10Dq(Ld) = 2*Tpp`. 0이면 리간드 궤도가 축퇴됩니다."}),
+    ],
+    "기하": [
+        ("coordination_geometry", "select", "배위 기하", {"choices": GEOMETRIES}),
+        ("ligand_radius", "number", "금속-리간드 거리 (Å)", {"step": 0.01}),
+        ("ligand_angle_offset_deg", "number", "각도 오프셋 (deg)", {"step": 0.1, "help": "사면체 일그러짐. 0이면 이상적인 사면체."}),
+        ("r2", "number", "r₂", {"step": 0.001}),
+        ("r4", "number", "r₄", {"step": 0.001}),
+    ],
+    "혼성화": [
+        ("hybridization_mode", "select", "방식", {"choices": ("geometry", "symmetry", "scalar")}),
+        ("pd_sigma", "number", "pdσ  (geometry)", {"step": 0.05}),
+        ("pd_ratio", "number", "pdπ/pdσ  (geometry)", {"step": 0.05}),
+        ("d_ref", "number", "기준 거리 (geometry)", {"step": 0.05}),
+        ("v_eg", "number", "V(e_g)  (symmetry)", {"step": 0.05}),
+        ("v_t2g", "number", "V(t₂g)  (symmetry)", {"step": 0.05}),
+        ("hopping", "number", "hopping  (scalar)", {"step": 0.05}),
+    ],
+    "다중항 축소": [
+        ("fdd2_scale", "number", "F²dd", {"step": 0.005}),
+        ("fdd4_scale", "number", "F⁴dd", {"step": 0.005}),
+        ("fpd2_scale", "number", "F²pd", {"step": 0.005}),
+        ("gpd1_scale", "number", "G¹pd", {"step": 0.005}),
+        ("gpd3_scale", "number", "G³pd", {"step": 0.005}),
+        ("so3d_scale", "number", "ζ₃d", {"step": 0.005}),
+        ("so2p_scale", "number", "ζ₂p", {"step": 0.005}),
+    ],
+    "솔버": [
+        ("n_initial_states", "int", "초기 상태 수", {"min": 1, "max": 100}),
+        ("temperature_kelvin", "number", "온도 (K)", {"step": 10.0}),
+        ("spectrum_method", "select", "방법", {"choices": ("lanczos", "exact")}),
+        ("n_recursion", "int", "Lanczos 반복", {"min": 20, "max": 3000}),
+        ("n_analyzed_states", "int", "분석 상태 수", {"min": 1, "max": 100}),
+        ("energy_step", "number", "에너지 격자 (eV)", {"step": 0.005}),
+        ("normalize", "select", "정규화", {"choices": ("max", "area", "none")}),
+    ],
 }
 
-# Sliders. Each entry is (label, minimum, maximum, step).
-CLUSTER_SLIDERS = {
-    "delta": ("Δ  전하이동 에너지", -5.0, 15.0, 0.05),
-    "u_charge_transfer": ("U_dd  d-d 쿨롱", 0.0, 12.0, 0.05),
-    "core_hole_potential": ("U_dc  core hole 인력", 0.0, 12.0, 0.05),
-    "ten_dq": ("10Dq  결정장", -2.0, 3.0, 0.01),
-    "ligand_ten_dq": ("10Dq(L)  리간드 분열", -3.0, 3.0, 0.01),
-}
+# Settings that differ between the two spectroscopies carry a prefix.
+PREFIXED_FIELDS = [
+    ("energy_min", "number", "에너지 최소 (eV)", {"step": 0.5}),
+    ("energy_max", "number", "에너지 최대 (eV)", {"step": 0.5}),
+    ("lorentzian_hwhm", "number", "Lorentzian HWHM (eV)", {"step": 0.01}),
+    ("gaussian_hwhm", "number", "Gaussian HWHM (eV)", {"step": 0.01}),
+    ("plot_relative_energy_min", "number", "플롯 최소 (eV)", {"step": 0.5}),
+    ("plot_relative_energy_max", "number", "플롯 최대 (eV)", {"step": 0.5}),
+]
 
-HYBRIDIZATION_SLIDERS = {
-    "geometry": {
-        "pd_sigma": ("pdσ", -4.0, 0.0, 0.05),
-        "pd_ratio": ("pdπ/pdσ 비", -4.0, 0.0, 0.05),
-    },
-    "symmetry": {
-        "v_eg": ("V(e_g)", 0.0, 4.0, 0.05),
-        "v_t2g": ("V(t_2g)", 0.0, 4.0, 0.05),
-    },
-    "scalar": {
-        "hopping": ("hopping", 0.0, 4.0, 0.05),
-    },
-}
+XAS_ONLY = [
+    ("make_experimental_geometry_curves", "bool", "실험 기하 곡선 생성", {}),
+    ("grazing_angle_deg", "number", "입사각 (deg)", {"step": 0.5}),
+    ("inplane_curve", "select", "면내 곡선", {"choices": ("ab", "x", "y")}),
+    ("overlay_xtls", "bool", "XTLS 참조 겹치기", {}),
+]
 
-BROADENING_SLIDERS = {
-    "lorentzian_hwhm": ("Lorentzian HWHM", 0.02, 1.5, 0.01),
-    "gaussian_hwhm": ("Gaussian HWHM", 0.0, 2.0, 0.01),
-}
-
-SLATER_KEYS = ("fdd2_scale", "fdd4_scale", "fpd2_scale", "gpd1_scale", "gpd3_scale")
+XPS_ONLY = [
+    ("photoemission_shell", "select", "방출 껍질", {"choices": ("2p", "3d", "ligand")}),
+    ("spin_resolved", "bool", "스핀 분해 출력", {}),
+    ("plot_binding_energy_axis", "bool", "결합에너지 축 반전", {}),
+]
 
 
 # ---------------------------------------------------------------------------
-# Calculation.
-
-
-def _module(mode: str):
-    if mode == "xas":
-        import run_xas as module
-    else:
-        import run_xps as module
-    return module
-
-
-@st.cache_data(show_spinner=False, max_entries=64)
-def compute(mode: str, input_file: str, overrides_json: str):
-    """Run one spectrum. Cached on the full parameter set."""
-    module = _module(mode)
-    module._load_input_file(input_file)
-    module.__dict__.update(json.loads(overrides_json))
-    # Broadening point lists would override the scalar widths set above.
-    module.__dict__["lorentzian_hwhm_points"] = []
-    module.__dict__["gaussian_hwhm_points"] = []
-    module.__dict__["gaussian_sigma"] = 0.0
-    energy, curves, metadata = module.calculate_spectrum()
-    return energy, {name: np.asarray(values) for name, values in curves.items()}, metadata
+# Reading a template.
 
 
 @st.cache_data(show_spinner=False)
-def defaults_for(mode: str, input_file: str) -> dict:
-    """Parameter values an input file starts from, after prefix resolution."""
-    module = _module(mode)
-    module._load_input_file(input_file)
-    keys = (
-        list(CLUSTER_SLIDERS)
-        + list(BROADENING_SLIDERS)
-        + list(SLATER_KEYS)
-        + ["hybridization_mode", "energy_min", "energy_max", "energy_shift", "so3d_scale", "so2p_scale"]
-        + [key for group in HYBRIDIZATION_SLIDERS.values() for key in group]
-    )
-    return {key: module.__dict__.get(key) for key in keys}
+def read_template(path: str) -> tuple[str, dict]:
+    """Return the file text and the values it defines, without side effects."""
+    import runpy
+
+    text = Path(path).read_text(encoding="utf-8")
+    values = runpy.run_path(path, init_globals={"ROOT": ROOT, "Path": Path})
+    values = {key: value for key, value in values.items() if not key.startswith("__")}
+    return text, values
+
+
+def resolved(values: dict, key: str, prefix: str, fallback=None):
+    """Prefixed key wins, matching how the runners read an input file."""
+    if f"{prefix}_{key}" in values:
+        return values[f"{prefix}_{key}"]
+    return values.get(key, fallback)
 
 
 # ---------------------------------------------------------------------------
-# Sidebar.
+# Instant panels. None of this diagonalizes anything.
 
 
-def sidebar() -> dict:
-    st.sidebar.title("xtls-py")
-
-    inputs = sorted((ROOT / "inputs").glob("*.py"))
-    if not inputs:
-        st.sidebar.error("inputs/ 에 입력 파일이 없습니다.")
-        st.stop()
-    input_file = st.sidebar.selectbox("물질", inputs, format_func=lambda path: path.stem)
-
-    view = st.sidebar.radio("분광법", ["XAS", "XPS", "XAS + XPS"], horizontal=True)
-    modes = {"XAS": ["xas"], "XPS": ["xps"], "XAS + XPS": ["xas", "xps"]}[view]
-
-    quality = st.sidebar.selectbox("계산 품질", list(QUALITY_PRESETS), index=0)
-    auto = st.sidebar.checkbox("슬라이더 조작 시 자동 계산", value=True)
-
-    base = defaults_for(modes[0], str(input_file))
-
-    st.sidebar.divider()
-    st.sidebar.subheader("클러스터")
-    overrides: dict = {}
-    for key, (label, low, high, step) in CLUSTER_SLIDERS.items():
-        value = base.get(key)
-        if value is None:
-            continue
-        overrides[key] = st.sidebar.slider(label, low, high, float(value), step, key=f"s_{key}")
-
-    hybridization_mode = st.sidebar.selectbox(
-        "혼성화 방식",
-        list(HYBRIDIZATION_SLIDERS),
-        index=list(HYBRIDIZATION_SLIDERS).index(base.get("hybridization_mode", "geometry")),
-    )
-    overrides["hybridization_mode"] = hybridization_mode
-    for key, (label, low, high, step) in HYBRIDIZATION_SLIDERS[hybridization_mode].items():
-        value = base.get(key)
-        if value is None:
-            continue
-        overrides[key] = st.sidebar.slider(label, low, high, float(value), step, key=f"s_{key}")
-
-    st.sidebar.divider()
-    st.sidebar.subheader("다중항·브로드닝")
-    slater = st.sidebar.slider(
-        "Slater 축소 인자",
-        0.5,
-        1.0,
-        float(base.get("fdd2_scale") or 0.8),
-        0.005,
-        help="F²dd, F⁴dd, F²pd, G¹pd, G³pd 에 일괄 적용됩니다. XTLS 기본값은 0.8.",
-    )
-    overrides.update({key: slater for key in SLATER_KEYS})
-    for key, (label, low, high, step) in BROADENING_SLIDERS.items():
-        value = base.get(key)
-        if value is None:
-            continue
-        overrides[key] = st.sidebar.slider(label, low, high, float(value), step, key=f"s_{key}")
-
-    st.sidebar.divider()
-    with st.sidebar.expander("에너지 범위"):
-        overrides["energy_min"] = st.number_input("최소 (eV)", value=float(base.get("energy_min", -20.0)))
-        overrides["energy_max"] = st.number_input("최대 (eV)", value=float(base.get("energy_max", 20.0)))
-        overrides["energy_shift"] = st.number_input("이동 (eV)", value=float(base.get("energy_shift", 0.0)))
-
-    return {
-        "input_file": str(input_file),
-        "modes": modes,
-        "quality": quality,
-        "auto": auto,
-        "overrides": overrides,
-    }
-
-
-# ---------------------------------------------------------------------------
-# Experimental overlay.
-
-
-def load_experiment(upload) -> tuple[np.ndarray, np.ndarray, list[str]] | None:
-    """Read a two-column or headed multi-column text file."""
-    if upload is None:
+def parse_ion(text: str) -> tuple[str, int] | None:
+    match = re.fullmatch(r"\s*([A-Za-z]{1,2})\s*([0-9]+)\s*\+\s*", str(text or ""))
+    if not match:
         return None
-    raw = upload.getvalue().decode("utf-8", errors="replace") if hasattr(upload, "getvalue") else Path(upload).read_text()
-    lines = [line for line in raw.splitlines() if line.strip()]
-    if not lines:
+    element = match.group(1).capitalize()
+    if element not in D_ELECTRON_GROUP:
         return None
-    header: list[str] = []
+    return element, int(match.group(2))
+
+
+def d_count(element: str, charge: int) -> int:
+    return D_ELECTRON_GROUP[element] - charge
+
+
+def effective_holes(element: str, n_d: int, requested: int, mode: str) -> tuple[int, str]:
+    """How many ligand-hole sectors actually survive the Appendix-A table."""
+    offset = {"xas": 1, "xps_core": 0, "xps_valence": -1}[mode]
+    p_electrons = 6 if mode == "xps_valence" else 5
+    effective = -1
+    reason = "none"
+    for holes in range(requested + 1):
+        initial_d = n_d + holes
+        final_d = n_d + offset + holes
+        if initial_d > 10 or not 0 <= final_d <= 10:
+            reason = f"3d 껍질이 h={holes} 에서 참"
+            break
+        if not has_entry(element, 6, initial_d) or not has_entry(element, p_electrons, final_d):
+            reason = f"h={holes} 에 Appendix-A 항목 없음 (3d{initial_d} / 3d{final_d})"
+            break
+        effective = holes
+    return max(effective, 0), reason
+
+
+def has_entry(element: str, p_electrons: int, d_electrons: int) -> bool:
+    if d_electrons in (0, 10):
+        return True  # closed shell: filled with zeros, as XTLS X-cards do
     try:
-        float(lines[0].split()[0])
-    except (ValueError, IndexError):
-        header = lines[0].replace(",", " ").split()
-        lines = lines[1:]
-    data = np.loadtxt(io.StringIO("\n".join(lines)))
-    if data.ndim == 1:
-        data = data[:, None]
-    if not header:
-        header = [f"col{i}" for i in range(data.shape[1])]
-    return data[:, 0], data[:, 1:], header[1:] if len(header) > 1 else header
+        get_appendix_a_3d(element, p_electrons, d_electrons)
+        return True
+    except KeyError:
+        return False
 
 
-def residual(energy, curve, exp_energy, exp_values) -> float:
-    """RMS difference after matching peak heights, in percent of the maximum."""
-    overlap = (exp_energy >= energy.min()) & (exp_energy <= energy.max())
-    if overlap.sum() < 5:
-        return float("nan")
-    interpolated = np.interp(exp_energy[overlap], energy, curve)
-    reference = exp_values[overlap]
-    scale = np.max(np.abs(interpolated)) or 1.0
-    exp_scale = np.max(np.abs(reference)) or 1.0
-    return 100.0 * float(np.sqrt(np.mean((interpolated / scale - reference / exp_scale) ** 2)))
+def basis_sizes(n_d: int, holes: int, mode: str) -> tuple[int, int]:
+    offset = {"xas": 1, "xps_core": 0, "xps_valence": -1}[mode]
+    core_factor = 1 if mode == "xps_valence" else 6
+    initial = final = 0
+    for h in range(holes + 1):
+        if n_d + h <= 10:
+            initial += comb(10, n_d + h) * comb(10, h)
+        final_d = n_d + offset + h
+        if 0 <= final_d <= 10:
+            final += core_factor * comb(10, final_d) * comb(10, h)
+    return initial, final
+
+
+def runtime_hint(final_size: int) -> str:
+    """Rough wall-clock guide, anchored on measured Fe d6 runs."""
+    if final_size < 2000:
+        return "1초 안팎"
+    if final_size < 5000:
+        return "수 초"
+    if final_size < 12000:
+        return "10초 안팎"
+    if final_size < 30000:
+        return "30초~1분"
+    return "수 분 이상"
+
+
+def geometry_positions(values: dict) -> np.ndarray | None:
+    """Ligand sites as [r, theta, phi]; None when a custom list is required."""
+    geometry = values.get("coordination_geometry")
+    radius = float(values.get("ligand_radius") or 2.0)
+    if geometry == "octahedral":
+        return np.array([
+            [radius, np.pi / 2, 0.0], [radius, np.pi / 2, np.pi],
+            [radius, np.pi / 2, np.pi / 2], [radius, np.pi / 2, 3 * np.pi / 2],
+            [radius, 0.0, 0.0], [radius, np.pi, 0.0],
+        ])
+    if geometry == "tetrahedral":
+        angle = np.deg2rad(54.7356 + float(values.get("ligand_angle_offset_deg") or 0.0))
+        return np.array([
+            [radius, angle, np.deg2rad(-45)], [radius, angle, np.deg2rad(135)],
+            [radius, np.pi - angle, np.deg2rad(45)], [radius, np.pi - angle, np.deg2rad(-135)],
+        ])
+    if geometry == "square_planar":
+        return np.array([[radius, np.pi / 2, phi] for phi in (0.0, np.pi / 2, np.pi, 3 * np.pi / 2)])
+    if geometry == "square_pyramidal":
+        return np.array(
+            [[radius, np.pi / 2, phi] for phi in (0.0, np.pi / 2, np.pi, 3 * np.pi / 2)]
+            + [[radius, 0.0, 0.0]]
+        )
+    if geometry == "trigonal_bipyramidal":
+        return np.array(
+            [[radius, np.pi / 2, phi] for phi in (0.0, 2 * np.pi / 3, 4 * np.pi / 3)]
+            + [[radius, 0.0, 0.0], [radius, np.pi, 0.0]]
+        )
+    return None
 
 
 # ---------------------------------------------------------------------------
-# Input-file export.
+# Writing the card.
 
 
-def rewrite_input(text: str, overrides: dict, prefix: str) -> str:
-    """Substitute values into the original file, keeping comments intact."""
+def rewrite(text: str, overrides: dict, prefixes: dict[str, str]) -> str:
+    """Substitute values into the template, leaving comments and layout alone."""
     updated = text
     for key, value in overrides.items():
-        for name in (f"{prefix}_{key}", key):
+        candidates = [key]
+        if key in prefixes:
+            candidates.insert(0, f"{prefixes[key]}_{key}")
+        for name in candidates:
             pattern = rf"^(\s*{re.escape(name)}\s*=\s*)([^\n#]*)"
             if not re.search(pattern, updated, flags=re.MULTILINE):
                 continue
-            replacement = repr(value) if isinstance(value, str) else f"{value}"
+            literal = repr(value) if isinstance(value, str) else str(value)
 
-            def substitute(match, text=replacement):
-                # Keep the gap before a trailing comment so the file stays tidy.
+            def substitute(match, text=literal):
                 original = match.group(2)
                 padding = " " * (len(original) - len(original.rstrip()))
                 return match.group(1) + text + padding
@@ -284,197 +290,266 @@ def rewrite_input(text: str, overrides: dict, prefix: str) -> str:
     return updated
 
 
+def widget(container, key: str, kind: str, label: str, options: dict, current):
+    handle = f"w_{key}"
+    help_text = options.get("help")
+    if kind == "text":
+        return container.text_input(label, value=str(current or ""), key=handle, help=help_text)
+    if kind == "bool":
+        return container.checkbox(label, value=bool(current), key=handle, help=help_text)
+    if kind == "select":
+        choices = list(options["choices"])
+        index = choices.index(current) if current in choices else 0
+        return container.selectbox(label, choices, index=index, key=handle, help=help_text)
+    if kind == "int":
+        return container.number_input(
+            label,
+            value=int(current if current is not None else 1),
+            min_value=options.get("min", 0),
+            max_value=options.get("max", 1000),
+            step=1,
+            key=handle,
+            help=help_text,
+        )
+    return container.number_input(
+        label,
+        value=float(current if current is not None else 0.0),
+        step=options.get("step", 0.1),
+        format="%.4g",
+        key=handle,
+        help=help_text,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Main.
 
 
 def main() -> None:
-    st.set_page_config(page_title="xtls-py", layout="wide")
-    settings = sidebar()
-    overrides = dict(settings["overrides"])
-    overrides.update(QUALITY_PRESETS[settings["quality"]])
+    st.set_page_config(page_title="xtls-py 입력 카드", layout="wide")
+    st.title("입력 카드 만들기")
+    st.caption(
+        "여기서는 계산하지 않습니다. 파라미터를 정해 입력 파일을 저장한 뒤, "
+        "`python run.py inputs/<이름>.py both` 로 실행하세요."
+    )
 
-    state = st.session_state
-    state.setdefault("pinned", [])
+    templates = sorted((ROOT / "inputs").glob("*.py"))
+    if not templates:
+        st.error("inputs/ 에 템플릿으로 쓸 입력 파일이 없습니다.")
+        st.stop()
 
-    top = st.container()
-    with top:
-        columns = st.columns([1, 1, 1, 3])
-        run_now = columns[0].button("계산", type="primary", width='stretch')
-        pin = columns[1].button("현재 곡선 고정", width='stretch')
-        clear = columns[2].button("고정 해제", width='stretch')
-    if clear:
-        state["pinned"] = []
+    header = st.columns([2, 1])
+    template_path = header[0].selectbox(
+        "시작 템플릿", templates, format_func=lambda path: path.stem,
+        help="이 파일의 값과 주석을 그대로 물려받고, 바꾼 값만 치환합니다.",
+    )
+    text, base = read_template(str(template_path))
 
-    if not (settings["auto"] or run_now or state.get("last")):
-        st.info("좌측에서 파라미터를 조정한 뒤 **계산**을 누르세요.")
+    values: dict = {}
+    prefixes: dict[str, str] = {}
+
+    tabs = st.tabs(list(FIELDS) + ["XAS 설정", "XPS 설정", "미리보기 · 저장"])
+
+    for tab, (section, fields) in zip(tabs, FIELDS.items()):
+        with tab:
+            columns = st.columns(2)
+            for index, (key, kind, label, options) in enumerate(fields):
+                values[key] = widget(columns[index % 2], key, kind, label, options, base.get(key))
+
+    with tabs[len(FIELDS)]:
+        st.caption("XAS 전용 설정과, 두 분광법이 다르게 쓰는 값의 XAS 쪽입니다.")
+        columns = st.columns(2)
+        for index, (key, kind, label, options) in enumerate(PREFIXED_FIELDS):
+            values[f"xas__{key}"] = widget(
+                columns[index % 2], f"xas_{key}", kind, label, options, resolved(base, key, "xas")
+            )
+        st.divider()
+        columns = st.columns(2)
+        for index, (key, kind, label, options) in enumerate(XAS_ONLY):
+            values[key] = widget(columns[index % 2], key, kind, label, options, base.get(key))
+
+    with tabs[len(FIELDS) + 1]:
+        st.caption("XPS 전용 설정과, 두 분광법이 다르게 쓰는 값의 XPS 쪽입니다.")
+        columns = st.columns(2)
+        for index, (key, kind, label, options) in enumerate(PREFIXED_FIELDS):
+            values[f"xps__{key}"] = widget(
+                columns[index % 2], f"xps_{key}", kind, label, options, resolved(base, key, "xps")
+            )
+        st.divider()
+        columns = st.columns(2)
+        for index, (key, kind, label, options) in enumerate(XPS_ONLY):
+            values[key] = widget(columns[index % 2], key, kind, label, options, base.get(key))
+
+    # Flatten the prefixed entries back into real key names.
+    overrides: dict = {}
+    for key, value in values.items():
+        if "__" in key:
+            prefix, name = key.split("__", 1)
+            overrides[name] = value
+            prefixes[name] = prefix
+        else:
+            overrides[key] = value
+
+    # The prefixed keys appear twice, once per spectroscopy, so they cannot go
+    # through the single-substitution rewrite together. Handle them separately.
+    shared = {key: value for key, value in overrides.items() if key not in prefixes}
+    updated = rewrite(text, shared, {})
+    for spectroscopy in ("xas", "xps"):
+        block = {
+            name: values[f"{spectroscopy}__{name}"]
+            for name in prefixes
+            if f"{spectroscopy}__{name}" in values
+        }
+        updated = rewrite(updated, block, {name: spectroscopy for name in block})
+
+    st.divider()
+    summary(values, base)
+
+    with tabs[-1]:
+        preview(updated, values, template_path)
+
+
+def summary(values: dict, base: dict) -> None:
+    """Instant feedback: basis sizes, sector energies, crystal field, Slater."""
+    ion = parse_ion(values.get("ion", ""))
+    st.subheader("즉시 확인")
+
+    if ion is None:
+        st.warning(f"이온 표기를 인식하지 못했습니다: {values.get('ion')!r}. 예: `Fe2+`, `Ni2+`")
+        return
+    element, charge = ion
+    n_d = d_count(element, charge)
+    if not 0 <= n_d <= 10:
+        st.error(f"{element}{charge}+ 는 d{n_d} 로, 0~10 범위를 벗어납니다.")
         return
 
-    results = {}
-    overrides_json = json.dumps(overrides, sort_keys=True)
-    for mode in settings["modes"]:
-        label = mode.upper()
-        with st.spinner(f"{label} 계산 중…"):
-            try:
-                results[mode] = compute(mode, settings["input_file"], overrides_json)
-            except Exception as error:  # noqa: BLE001 -- surfaced to the user
-                st.error(f"{label} 계산 실패: {error}")
-    if not results:
-        return
-    state["last"] = True
+    requested = int(values.get("max_ligand_holes", 1))
+    xps_mode = "xps_valence" if values.get("photoemission_shell") == "3d" else "xps_core"
 
-    if pin:
-        summary = ", ".join(
-            f"{key}={overrides[key]:g}" for key in ("delta", "u_charge_transfer", "ten_dq") if key in overrides
-        )
-        state["pinned"].append(
+    columns = st.columns(3)
+    columns[0].markdown(f"**{element}{charge}+ → 3d{n_d}**")
+
+    rows = []
+    for label, mode in (("XAS", "xas"), ("XPS", xps_mode)):
+        holes, reason = effective_holes(element, n_d, requested, mode)
+        initial, final = basis_sizes(n_d, holes, mode)
+        rows.append(
             {
-                "label": summary,
-                "curves": {mode: (energy.copy(), {k: v.copy() for k, v in curves.items()}) for mode, (energy, curves, _) in results.items()},
+                "분광법": label,
+                "유효 h": holes,
+                "초기 기저": f"{initial:,}",
+                "최종 기저": f"{final:,}",
+                "예상 시간": runtime_hint(final),
+                "비고": "" if holes >= requested else reason,
             }
         )
+    columns[0].dataframe(rows, hide_index=True, width="stretch")
 
-    experiment = None
-    with st.expander("실험 데이터 비교", expanded=False):
-        upload_columns = st.columns([2, 1, 1])
-        upload = upload_columns[0].file_uploader("측정 스펙트럼 (2열 또는 헤더 있는 다열 텍스트)", type=["txt", "csv", "dat"])
-        if upload is None:
-            bundled = sorted((ROOT / "data").glob("*.txt"))
-            if bundled:
-                choice = upload_columns[0].selectbox(
-                    "또는 data/ 에서 선택", ["(없음)"] + [path.name for path in bundled]
-                )
-                if choice != "(없음)":
-                    upload = ROOT / "data" / choice
-        loaded = load_experiment(upload)
-        if loaded is not None:
-            exp_energy, exp_matrix, exp_names = loaded
-            column = upload_columns[1].selectbox("열", exp_names, index=min(len(exp_names) - 1, 0))
-            shift = upload_columns[2].slider("에너지 이동 (eV)", -20.0, 20.0, 0.0, 0.05)
-            experiment = (exp_energy + shift, exp_matrix[:, exp_names.index(column)], column)
+    # Sector energies -- a closed formula, no diagonalization.
+    delta = float(values.get("delta", 0.0))
+    u_dd = float(values.get("u_charge_transfer", 0.0))
+    u_dc = float(values.get("core_hole_potential", 0.0))
+    holes_xas, _ = effective_holes(element, n_d, requested, "xas")
+    energy_rows = []
+    for h in range(holes_xas + 1):
+        energy_rows.append({
+            "배치": f"2p⁶ 3d{n_d + h}" + ("" if h == 0 else f" L{h if h > 1 else ''}"),
+            "종류": "초기",
+            "E (eV)": round(sector_energy(h, 0, delta, u_dd, u_dc, d_electron_offset=0), 3),
+        })
+    for h in range(holes_xas + 1):
+        energy_rows.append({
+            "배치": f"2p⁵ 3d{n_d + 1 + h}" + ("" if h == 0 else f" L{h if h > 1 else ''}"),
+            "종류": "XAS 종",
+            "E (eV)": round(sector_energy(h, 1, delta, u_dd, u_dc, d_electron_offset=1), 3),
+        })
+    for h in range(holes_xas + 1):
+        energy_rows.append({
+            "배치": f"2p⁵ 3d{n_d + h}" + ("" if h == 0 else f" L{h if h > 1 else ''}"),
+            "종류": "XPS 종",
+            "E (eV)": round(sector_energy(h, 1, delta, u_dd, u_dc, d_electron_offset=0), 3),
+        })
+    columns[1].markdown("**배치 에너지**")
+    columns[1].dataframe(energy_rows, hide_index=True, width="stretch", height=260)
 
-    for mode in settings["modes"]:
-        energy, curves, metadata = results[mode]
-        st.subheader(f"{mode.upper()}  ·  {Path(settings['input_file']).stem}")
-        default_columns = ["iso", "ld"] if mode == "xas" else ["total"]
-        available = list(curves)
-        chosen = st.multiselect(
-            "표시할 곡선",
-            available,
-            default=[name for name in default_columns if name in available] or available[:1],
-            key=f"cols_{mode}",
-        )
-        figure = plot(mode, energy, curves, chosen, state["pinned"], experiment)
-        st.pyplot(figure, width='stretch')
-        plt.close(figure)
-
-        info = st.columns(4)
-        info[0].metric("초기 기저", int(metadata["initial_basis_size"]))
-        info[1].metric("최종 기저", int(metadata["final_basis_size"]))
-        info[2].metric("onset (eV)", f"{metadata['onset']:.3f}")
-        if mode == "xps":
-            info[3].metric("합 규칙", f"{metadata['sum_rule_weight']:.3f}")
-        if experiment is not None and chosen:
-            deviations = [
-                f"{name}: {residual(energy, curves[name], experiment[0], experiment[1]):.2f}%" for name in chosen
-            ]
-            st.caption("실험 대비 RMS 편차 (최대값 정규화 후) — " + ",  ".join(deviations))
-
-        with st.expander("배치 에너지 / 상태 조성"):
-            table = st.columns(2)
-            table[0].dataframe(
-                [
-                    {"label": row["label"], "배치": row["configuration"], "E (eV)": round(row["energy_eV"], 4)}
-                    for row in metadata["configuration_energies"]
-                ],
-                width='stretch',
-                hide_index=True,
+    # Crystal field -- a 5x5 eigenvalue problem, microseconds.
+    positions = geometry_positions(values)
+    columns[2].markdown("**결정장 준위**")
+    if positions is None:
+        columns[2].info("사용자 지정 좌표는 입력 파일에서 직접 적어주세요.")
+    else:
+        try:
+            matrix, *_ = crystal_field(positions, float(values.get("ten_dq", 0.0)),
+                                       float(values.get("r2", 0.4)), float(values.get("r4", 0.38)))
+            levels = np.real(np.diag(matrix))
+            columns[2].dataframe(
+                [{"궤도": name, "E (eV)": round(float(level), 4)}
+                 for name, level in zip(D_ORBITAL_LABELS, levels)],
+                hide_index=True, width="stretch",
             )
-            analysis = metadata.get("state_analysis", {})
-            rows = analysis.get("initial", [])[:5]
-            if rows and "composition" in rows[0]:
-                table[1].dataframe(
-                    [
-                        {"상태": row["index"], "dE (meV)": round(row["energy_relative_meV"], 3), "조성": row["composition"]}
-                        for row in rows
-                    ],
-                    width='stretch',
-                    hide_index=True,
-                )
+            spread = float(np.max(levels) - np.min(levels))
+            columns[2].caption(f"전체 분열폭 {spread:.3f} eV")
+        except Exception as error:  # noqa: BLE001 -- shown to the user
+            columns[2].warning(f"결정장 계산 불가: {error}")
 
-    export(settings, overrides)
-
-
-def plot(mode, energy, curves, chosen, pinned, experiment):
-    figure, axis = plt.subplots(figsize=(9.0, 4.2))
-
-    for index, entry in enumerate(pinned):
-        if mode not in entry["curves"]:
-            continue
-        pin_energy, pin_curves = entry["curves"][mode]
-        for name in chosen:
-            if name in pin_curves:
-                axis.plot(
-                    pin_energy,
-                    pin_curves[name],
-                    lw=0.9,
-                    alpha=0.45,
-                    color=f"C{index % 10}",
-                    label=f"고정 {index + 1}: {entry['label']}" if name == chosen[0] else None,
-                )
-
-    for name in chosen:
-        axis.plot(energy, curves[name], lw=1.7, label=name)
-
-    if experiment is not None:
-        exp_energy, exp_values, exp_name = experiment
-        reference = curves[chosen[0]] if chosen else next(iter(curves.values()))
-        scale = (np.max(np.abs(reference)) or 1.0) / (np.max(np.abs(exp_values)) or 1.0)
-        axis.plot(exp_energy, exp_values * scale, "k--", lw=1.0, alpha=0.75, label=f"실험: {exp_name}")
-
-    axis.set_xlabel("Binding energy (eV)" if mode == "xps" else "Relative energy (eV)")
-    axis.set_ylabel("Intensity (arb.)")
-    axis.axhline(0.0, color="0.7", lw=0.6)
-    if mode == "xps":
-        axis.invert_xaxis()
-    axis.legend(frameon=False, fontsize=8, ncol=2)
-    axis.tick_params(direction="in", top=True, right=True)
-    figure.tight_layout()
-    return figure
+    # Slater integrals actually available for these sectors.
+    with st.expander("이 배치에서 쓰이는 Slater 적분 (Appendix A)"):
+        table = []
+        wanted = [(6, n_d + h) for h in range(holes_xas + 1)]
+        wanted += [(5, n_d + 1 + h) for h in range(holes_xas + 1)]
+        wanted += [(5, n_d + h) for h in range(holes_xas + 1)]
+        for p_electrons, d_electrons in sorted(set(wanted)):
+            if not 0 <= d_electrons <= 10:
+                continue
+            try:
+                entry = get_appendix_a_3d(element, p_electrons, d_electrons)
+            except KeyError:
+                table.append({
+                    "배치": f"2p{p_electrons} 3d{d_electrons}",
+                    "비고": "표 없음 — 닫힌 껍질이면 0으로 채워짐" if d_electrons in (0, 10) else "표 없음 (계산 불가)",
+                })
+                continue
+            scale = float(values.get("fdd2_scale", 1.0))
+            table.append({
+                "배치": f"2p{p_electrons} 3d{d_electrons}",
+                "F²dd": round(entry.fdd2 * scale, 3),
+                "F⁴dd": round(entry.fdd4 * scale, 3),
+                "ζ₃d": round(entry.zeta_d * float(values.get("so3d_scale", 1.0)), 4),
+                "ζ₂p": None if entry.zeta_2p is None else round(entry.zeta_2p * float(values.get("so2p_scale", 1.0)), 3),
+                "비고": "",
+            })
+        st.dataframe(table, hide_index=True, width="stretch")
+        st.caption(
+            f"{element} 에 대해 표에 있는 배치: "
+            + ", ".join(f"2p{p}3d{d}" for _e, p, d in sorted(available_appendix_a_3d(element)))
+        )
 
 
-def export(settings, overrides) -> None:
-    st.divider()
-    st.subheader("입력 파일로 저장")
-    st.caption(
-        "지금 슬라이더 값을 원본 입력 파일에 반영해 내보냅니다. 주석은 그대로 유지되고, "
-        "`run.py` 로 최종 품질 재계산이 가능합니다. 품질 프리셋은 반영하지 않습니다."
-    )
+def preview(updated: str, values: dict, template_path: Path) -> None:
+    st.subheader("저장")
+    name_default = f"{values.get('case_name') or template_path.stem}.py"
+    columns = st.columns([2, 1, 1])
+    name = columns[0].text_input("파일 이름", value=name_default)
+    if not name.endswith(".py"):
+        name += ".py"
 
-    source = Path(settings["input_file"])
-    text = source.read_text(encoding="utf-8")
-    tunable = {key: value for key, value in overrides.items() if key not in QUALITY_PRESETS[settings["quality"]]}
-    updated = rewrite_input(text, tunable, prefix=settings["modes"][0])
-
-    columns = st.columns([2, 1])
-    name = columns[0].text_input("파일 이름", value=f"{source.stem}_fit.py")
     columns[1].download_button(
-        "내려받기",
-        data=updated.encode("utf-8"),
-        file_name=name,
-        mime="text/x-python",
-        width='stretch',
+        "내려받기", data=updated.encode("utf-8"), file_name=name,
+        mime="text/x-python", width="stretch",
     )
-    if columns[1].button("inputs/ 에 저장", width='stretch'):
-        target = ROOT / "inputs" / name
-        if target.exists():
-            st.warning(f"이미 있는 파일입니다: {target.name}. 이름을 바꾸세요.")
+    target = ROOT / "inputs" / name
+    overwrite = columns[2].checkbox("덮어쓰기 허용", value=False)
+    if columns[2].button("inputs/ 에 저장", width="stretch", type="primary"):
+        if target.exists() and not overwrite:
+            st.warning(f"이미 있는 파일입니다: inputs/{name}. 덮어쓰려면 위 체크박스를 켜세요.")
         else:
             target.write_text(updated, encoding="utf-8")
-            st.success(f"저장했습니다: inputs/{target.name}")
+            st.success(f"저장했습니다: inputs/{name}")
+            st.code(f"python run.py inputs/{name} both", language="bash")
 
-    with st.expander("변경 내용 미리보기"):
-        st.code("\n".join(f"{key} = {value}" for key, value in sorted(tunable.items())), language="python")
+    st.divider()
+    st.caption("생성될 파일 전체입니다. 템플릿의 주석과 구조는 그대로 유지됩니다.")
+    st.code(updated, language="python")
 
 
 if __name__ == "__main__":
