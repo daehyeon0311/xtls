@@ -5,10 +5,24 @@ import numpy as np
 from .basis import FockBasis
 from .configuration import (
     basis_from_configurations,
+    core_xps_final_configurations,
     sector_energy,
+    valence_xps_final_configurations,
     xas_final_configurations,
     xas_initial_configurations,
 )
+
+
+# Orbital layout of the 26 spin-orbitals: 2p, then 3d, then the ligand shell.
+P_SPIN_ORBITALS = tuple(range(0, 6))
+D_SPIN_ORBITALS = tuple(range(6, 16))
+LIGAND_SPIN_ORBITALS = tuple(range(16, 26))
+
+PHOTOEMISSION_SHELLS = {
+    "2p": P_SPIN_ORBITALS,
+    "3d": D_SPIN_ORBITALS,
+    "ligand": LIGAND_SPIN_ORBITALS,
+}
 
 
 def p_ct_spin_orbital_labels() -> tuple[str, ...]:
@@ -51,6 +65,47 @@ def p_ct_xas_final_basis(
     )
 
 
+def p_ct_core_xps_final_basis(
+    n_d_electrons: int,
+    max_ligand_holes: int = 1,
+) -> FockBasis:
+    """Final `2p^5(3d^n + 3d^(n+1)L + ...)` basis for core-level XPS."""
+    return basis_from_configurations(
+        core_xps_final_configurations(
+            n_d_electrons,
+            max_ligand_holes=max_ligand_holes,
+        )
+    )
+
+
+def p_ct_valence_xps_final_basis(
+    n_d_electrons: int,
+    max_ligand_holes: int = 1,
+) -> FockBasis:
+    """Final `2p^6(3d^(n-1) + 3d^n L + ...)` basis for valence-band XPS."""
+    return basis_from_configurations(
+        valence_xps_final_configurations(
+            n_d_electrons,
+            max_ligand_holes=max_ligand_holes,
+        )
+    )
+
+
+def p_ct_photoemission_orbitals(shell: str = "2p") -> tuple[int, ...]:
+    """Spin-orbital indices the photoelectron can be removed from.
+
+    Photoemission intensity sums these channels incoherently, and that sum is
+    invariant under a unitary change of basis inside the shell, so the cubic
+    harmonics used here give the same spectrum as spherical ones would.
+    """
+    try:
+        return PHOTOEMISSION_SHELLS[shell]
+    except KeyError:
+        raise ValueError(
+            f"shell must be one of {sorted(PHOTOEMISSION_SHELLS)}, got {shell!r}"
+        ) from None
+
+
 def ligand_hole_count(state: int, n_d_spin_orbitals: int = 10) -> int:
     ligand_mask = ((1 << n_d_spin_orbitals) - 1) << n_d_spin_orbitals
     ligand_occupied = ((state & ligand_mask) >> n_d_spin_orbitals).bit_count()
@@ -71,11 +126,14 @@ def p_ct_charge_transfer_energy_values(
     delta: float,
     u_charge_transfer: float = 0.0,
     core_hole_potential: float = 0.0,
+    d_electron_offset: int = 0,
 ) -> np.ndarray:
     """Diagonal sector energy for every state of a `2p + 3d + ligand` basis.
 
     The per-sector formula lives in `configuration.sector_energy`; this only
     classifies each state by its ligand-hole and core-hole count.
+    `d_electron_offset` selects the spectroscopy: `0` for the initial state and
+    for core-level XPS, `1` for XAS, `-1` for valence-band XPS.
     """
     values = np.zeros(len(basis), dtype=float)
     for idx, state in enumerate(basis.states):
@@ -85,6 +143,7 @@ def p_ct_charge_transfer_energy_values(
             delta=delta,
             u_charge_transfer=u_charge_transfer,
             core_hole_potential=core_hole_potential,
+            d_electron_offset=d_electron_offset,
         )
     return values
 

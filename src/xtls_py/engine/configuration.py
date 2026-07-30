@@ -107,6 +107,53 @@ def xas_final_configurations(
     )
 
 
+def core_xps_final_configurations(
+    n_d_electrons: int,
+    max_ligand_holes: int = 1,
+) -> tuple[Configuration, ...]:
+    """Return `2p5 3d^n`, `2p5 3d^(n+1)L`, ... sectors for core-level XPS.
+
+    The photoelectron leaves the cluster, so unlike XAS the d count does not
+    grow: only the 2p shell loses one electron. These are the `#f` sectors of
+    the XTLS `Mode=XPS` X-card.
+    """
+
+    _validate_hole_request(n_d_electrons, max_ligand_holes)
+    max_holes = min(max_ligand_holes, _D_SPIN_ORBITALS - n_d_electrons)
+    return tuple(
+        Configuration(
+            p_electrons=_P_SPIN_ORBITALS - 1,
+            d_electrons=n_d_electrons + holes,
+            ligand_holes=holes,
+        )
+        for holes in range(max_holes + 1)
+    )
+
+
+def valence_xps_final_configurations(
+    n_d_electrons: int,
+    max_ligand_holes: int = 1,
+) -> tuple[Configuration, ...]:
+    """Return `2p6 3d^(n-1)`, `2p6 3d^n L`, ... sectors for valence-band XPS.
+
+    Here the photoelectron is removed from the valence shell, so the core shell
+    stays filled and the d count drops by one.
+    """
+
+    if not 1 <= n_d_electrons <= _D_SPIN_ORBITALS:
+        raise ValueError("n_d_electrons must satisfy 1 <= n <= 10 for valence XPS")
+    _validate_hole_request(n_d_electrons, max_ligand_holes)
+    max_holes = min(max_ligand_holes, _D_SPIN_ORBITALS - n_d_electrons)
+    return tuple(
+        Configuration(
+            p_electrons=_P_SPIN_ORBITALS,
+            d_electrons=n_d_electrons - 1 + holes,
+            ligand_holes=holes,
+        )
+        for holes in range(max_holes + 1)
+    )
+
+
 def basis_from_configurations(configurations: tuple[Configuration, ...] | list[Configuration]) -> FockBasis:
     """Build a Fock basis from compatible `2p + 3d + ligand` configurations."""
 
@@ -158,6 +205,7 @@ def sector_energy(
     delta: float,
     u_charge_transfer: float = 0.0,
     core_hole_potential: float = 0.0,
+    d_electron_offset: int = 0,
 ) -> float:
     """Diagonal energy of one charge-transfer sector.
 
@@ -165,17 +213,31 @@ def sector_energy(
     diagonal of the many-body Hamiltonian, and by the configuration-energy
     table written to the output files.
 
-    Without a core hole this gives `0`, `Delta`, `2Delta + Udd`, ...
-    for `L0`, `L1`, `L2`, ... sectors. With one 2p core hole this gives
-    `0`, `Delta + Udd - Upd`, `2Delta + 3Udd - 2Upd`, ... .
+    Following the configuration-centroid formula of the XTLS manual, writing
+    `h` for the ligand-hole count, `c` for the core-hole count and `dd` for the
+    d-electron offset of this final state relative to the initial `3d^n`
+    reference,
+
+        E = h*Delta + Udd * h * (2*dd + h - 1) / 2 - c * h * Udc.
+
+    `d_electron_offset` is what distinguishes the spectroscopies, because
+    `Delta` is defined on the initial configuration and each sector adds a
+    different number of d-d pairs:
+
+    =====================  ====  ====  ===========================
+    sector                   dd     c  L1 energy
+    =====================  ====  ====  ===========================
+    initial `3d^n`            0     0  `Delta`
+    XAS `2p5 3d^(n+1)`        1     1  `Delta + Udd - Udc`
+    core XPS `2p5 3d^n`       0     1  `Delta - Udc`
+    valence XPS `3d^(n-1)`   -1     0  `Delta - Udd`
+    =====================  ====  ====  ===========================
     """
 
     holes = ligand_holes
-    if core_holes:
-        energy = holes * delta + holes * (holes + 1) * u_charge_transfer / 2.0
-        energy -= core_holes * holes * core_hole_potential
-    else:
-        energy = holes * delta + holes * (holes - 1) * u_charge_transfer / 2.0
+    energy = holes * delta
+    energy += u_charge_transfer * holes * (2 * d_electron_offset + holes - 1) / 2.0
+    energy -= core_holes * holes * core_hole_potential
     return float(energy)
 
 

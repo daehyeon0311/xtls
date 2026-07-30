@@ -554,6 +554,7 @@ def _build_initial_hamiltonian(basis, h_crystal, h_hybridization, slater_by_hole
             delta,
             u_charge_transfer,
             core_hole_potential=core_hole_potential,
+            d_electron_offset=0,
         )
     )
     for holes, slater in slater_by_hole.items():
@@ -590,6 +591,9 @@ def _build_final_hamiltonian(basis, h_crystal, h_hybridization, slater_by_hole):
             delta,
             u_charge_transfer,
             core_hole_potential=core_hole_potential,
+            # XAS promotes the core electron into the d shell, so every final
+            # sector carries one more d electron than the initial reference.
+            d_electron_offset=1,
         )
     )
     for holes, slater in slater_by_hole.items():
@@ -913,7 +917,7 @@ def _configuration_energy_rows(max_holes: int) -> list[dict[str, object]]:
                 "label": f"#i{holes + 1}",
                 "state": "initial",
                 "configuration": _configuration_label(6, n_d_electrons + holes, holes),
-                "energy_eV": _configuration_energy(holes, core_holes=0),
+                "energy_eV": _configuration_energy(holes, core_holes=0, d_electron_offset=0),
             }
         )
     for holes in range(max_holes + 1):
@@ -922,19 +926,20 @@ def _configuration_energy_rows(max_holes: int) -> list[dict[str, object]]:
                 "label": f"#f{holes + 1}",
                 "state": "final",
                 "configuration": _configuration_label(5, n_d_electrons + 1 + holes, holes),
-                "energy_eV": _configuration_energy(holes, core_holes=1),
+                "energy_eV": _configuration_energy(holes, core_holes=1, d_electron_offset=1),
             }
         )
     return rows
 
 
-def _configuration_energy(holes: int, core_holes: int) -> float:
+def _configuration_energy(holes: int, core_holes: int, d_electron_offset: int) -> float:
     return sector_energy(
         ligand_holes=holes,
         core_holes=core_holes,
         delta=delta,
         u_charge_transfer=u_charge_transfer,
         core_hole_potential=core_hole_potential,
+        d_electron_offset=d_electron_offset,
     )
 
 

@@ -55,6 +55,40 @@ def one_body_between_bases_sparse(final_basis: FockBasis, initial_basis: FockBas
     return _assemble(sparse, rows, cols, data, (len(final_basis), len(initial_basis)))
 
 
+def annihilation_between_bases_sparse(final_basis: FockBasis, initial_basis: FockBasis, orbital: int):
+    """Sparse matrix for the single annihilation operator `c_orbital`.
+
+    This is the photoemission transition operator: it maps an `N`-electron
+    basis onto an `N-1`-electron one. XTLS instead keeps the electron count
+    fixed by moving the photoelectron into a continuum orbital that is left out
+    of the configuration list; dropping the electron outright is equivalent and
+    keeps the final basis smaller.
+    """
+    sparse = _require_scipy_sparse()
+    if final_basis.n_orbitals != initial_basis.n_orbitals:
+        raise ValueError("bases must use the same orbital space")
+    if final_basis.n_electrons != initial_basis.n_electrons - 1:
+        raise ValueError("annihilation must lower the electron count by exactly one")
+    if not 0 <= int(orbital) < initial_basis.n_orbitals:
+        raise ValueError("orbital is outside the orbital space")
+
+    lookup = _StateLookup(final_basis)
+    states = np.asarray(initial_basis.states, dtype=np.int64)
+    columns = np.arange(len(initial_basis))
+    moved, source, signs = _apply_chain(states, columns, (("a", int(orbital)),))
+    row, keep = lookup.index_of(moved)
+    shape = (len(final_basis), len(initial_basis))
+    if row.size == 0:
+        return sparse.csr_matrix(shape, dtype=complex)
+    return _assemble(
+        sparse,
+        [row],
+        [source[keep]],
+        [signs[keep].astype(complex)],
+        shape,
+    )
+
+
 def two_body_sparse(basis: FockBasis, tensor, prefactor: float = 0.5, threshold: float = 0.0):
     """Sparse matrix for prefactor * sum_ijkl V[i,j,k,l] c_i^dag c_j^dag c_l c_k.
 
