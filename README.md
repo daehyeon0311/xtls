@@ -6,10 +6,11 @@
 Arata Tanaka의 Fortran 프로그램 **XTLS**와 같은 물리 모델을 독립적으로 Python으로 구현했습니다.
 저장소에 함께 둔 `Xtls900_man_Jpn.pdf`가 원조 프로그램의 매뉴얼입니다.
 
-| 실행 스크립트 | 분광법 | XTLS 대응 |
+| 모드 | 분광법 | XTLS 대응 |
 |---|---|---|
-| `run_xas.py` | L-edge XAS, 선형이색성 | `Mode=XAS` |
-| `run_xps.py` | 코어준위 XPS, 원자가띠 XPS | `Mode=XPS` (`PES`) |
+| `xas` | L-edge XAS, 선형이색성 | `Mode=XAS` |
+| `xps` | 코어준위 XPS, 원자가띠 XPS | `Mode=XPS` (`PES`) |
+| `both` | 둘 다 연속 실행 | — |
 
 두 계산은 **같은 파라미터 세트**(Δ, U_dd, U_dc, 10Dq, 혼성화)를 공유합니다.
 XAS와 XPS를 동시에 맞추는 것이 이 모델의 표준 사용법입니다 —
@@ -41,43 +42,70 @@ pip install -e .
 
 ## 실행
 
-입력 파일에서 파라미터를 수정한 뒤 해당 스크립트를 실행합니다.
+진입점은 `run.py` 하나입니다.
 
 ```bash
-python run_xas.py    # inputs/Fe_Ba2FeSi2O7.py
-python run_xps.py    # inputs/xps_NiO.py
+python run.py                                  # 상단 설정대로
+python run.py inputs/Fe_Ba2FeSi2O7.py xas
+python run.py inputs/Fe_Ba2FeSi2O7.py xps
+python run.py inputs/NiO.py both               # 두 분광법 연속 실행
 ```
 
-Spyder에서는 스크립트를 열고 **F5**를 누르면 됩니다.
-다른 입력 파일을 쓰려면 스크립트 상단의 `INPUT_FILE`을 바꿉니다.
-
-원소·원자가는 `ion` 한 줄로 지정하면 나머지가 자동으로 채워집니다.
+Spyder에서는 `run.py`를 열어 상단 두 줄만 고치고 **F5**를 누르면 됩니다.
 
 ```python
-ion = "Ni2+"        # element, d 전자수, output 경로, 플롯 오프셋 자동 결정
+INPUT_FILE = ROOT / "inputs" / "Fe_Ba2FeSi2O7.py"
+SPECTROSCOPY = "xas"        # "xas" | "xps" | "both"
 ```
+
+`run_xas.py`, `run_xps.py`를 직접 실행해도 됩니다. 같은 입력 파일을 읽습니다.
+
+### 입력 파일 = 물질 하나
+
+한 파일이 두 분광법을 모두 기술합니다.
+
+```python
+# 공통 — 클러스터 자체. 한 번만 씁니다.
+ion = "Ni2+"                # element, d전자수, 출력경로, 플롯 오프셋 자동 결정
+delta = 4.7
+u_charge_transfer = 7.3
+coordination_geometry = "octahedral"
+
+# 분광법별로 값이 달라야 하는 것만 접두사를 붙입니다.
+xas_energy_min = -15.0
+xps_energy_min = -3.0
+
+# 한쪽만 아는 설정은 접두사가 필요 없습니다 (상대는 무시).
+grazing_angle_deg = 23.5        # XAS 전용
+photoemission_shell = "2p"      # XPS 전용
+```
+
+접두사 붙은 값이 없는 값을 이깁니다. 따라서 Δ를 한 번 고치면 두 스펙트럼이 함께 움직입니다 —
+XAS와 XPS를 한 파라미터 세트로 동시에 맞추는 것이 이 모델의 표준 사용법이므로, 이 구조가 불일치를 원천 차단합니다.
 
 결과는 `outputs/<case_name>/`에 저장됩니다 (git 추적 제외).
 스펙트럼 `.txt`, 그림 `.png`, 사용 파라미터 `.json`, 배치 에너지, 고유상태 분석이 함께 나옵니다.
+XAS와 XPS 결과는 파일명이 달라 같은 폴더에 공존합니다.
 
 ### 수록된 입력 예제
 
 | 파일 | 내용 |
 |---|---|
-| `inputs/Fe_Ba2FeSi2O7.py` | Ba₂FeSi₂O₇의 Fe²⁺ (d⁶, 사면체) L-edge XAS/LD |
-| `inputs/xps_Fe_Ba2FeSi2O7.py` | 같은 클러스터의 Fe 2p XPS |
-| `inputs/xps_NiO.py` | NiO의 Ni 2p XPS — **XTLS 매뉴얼 예제 재현** |
+| `inputs/Fe_Ba2FeSi2O7.py` | Ba₂FeSi₂O₇의 Fe²⁺ (d⁶, 사면체) — XAS/LD + 2p XPS |
+| `inputs/NiO.py` | NiO의 Ni²⁺ (d⁸, 팔면체) — **XPS는 XTLS 매뉴얼 예제 재현** |
 
-`xps_NiO.py`는 매뉴얼 20–21쪽의 X-card를 그대로 옮긴 것으로, 구현 검증용 기준입니다.
+`NiO.py`의 XPS 블록은 매뉴얼 20–21쪽 X-card를 그대로 옮긴 것으로, 구현 검증용 기준입니다.
+(매뉴얼에 NiO XAS 카드는 없어서, 그쪽은 미검증입니다.)
 
 ---
 
 ## 구조
 
 ```
-run_xas.py           XAS/LD 실행 스크립트
-run_xps.py           XPS 실행 스크립트
-inputs/              계산 조건 입력 파일 (케이스 하나당 하나)
+run.py               진입점 — 입력 파일과 분광법 선택
+run_xas.py           XAS/LD 계산 (단독 실행도 가능)
+run_xps.py           XPS 계산 (단독 실행도 가능)
+inputs/              계산 조건 입력 파일 (물질 하나당 하나)
 src/xtls_py/
   engine/
     basis.py           Fock 기저 (정수 비트패턴)
@@ -150,6 +178,17 @@ Xtls900_man_Jpn.pdf  원조 XTLS 9.0 매뉴얼 (일본어)
   스핀궤도 분리 17.5 eV를 재현합니다 (ζ₂p·3/2 = 17.3 eV).
 - **합 규칙**: 코어준위 XPS의 총 스펙트럼 세기가 껍질 점유수(2p⁶ → 6.000)와 일치합니다.
 - **Appendix-A 표**: 매뉴얼이 인쇄한 NiO Slater 적분값과 소수점 셋째 자리까지 일치합니다.
+- **교차 검증**: 같은 입력의 XAS와 XPS가 동일한 초기 바닥상태 에너지를 줍니다.
+
+### 축퇴 상태에 대한 주의
+
+`lowest_eigenpairs`는 ARPACK 시작 벡터를 고정해 실행 간 재현성을 보장합니다.
+다만 이것은 선택을 **고정**할 뿐이며, 축퇴 부공간 안에서는 어떤 기저도 똑같이 유효합니다.
+
+따라서 부공간 불변량이 아닌 값 — `state_analysis.txt`의 개별 상태 Sz·Lz,
+스핀 분해 XPS 채널, 정방정계가 아닌 경우의 x/y 편광 — 은 물리적으로 유일하게 정해지지 않습니다.
+합성량(`iso`, `ld`, `total`)은 영향받지 않습니다.
+개별 상태량이 필요하시면 축퇴 부공간 안에서 Sz를 대각화해 기저를 고정하는 후처리가 필요합니다.
 
 ## 참고
 

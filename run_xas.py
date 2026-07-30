@@ -62,8 +62,8 @@ from xtls_py.spectrum import (  # noqa: E402
 INPUT_FILE = ROOT / "inputs" / "Fe_Ba2FeSi2O7.py"
 
 
-def main() -> None:
-    _load_input_file()
+def main(input_file=None) -> None:
+    _load_input_file(input_file)
     _validate_parameters()
     effective_estimate_holes = _effective_max_ligand_holes()
     estimated_initial, estimated_final = _estimate_basis_sizes(effective_estimate_holes)
@@ -273,19 +273,39 @@ _D_ELECTRON_GROUP = {
 }
 
 
-def _load_input_file() -> None:
-    path = Path(INPUT_FILE)
+_PREFIX = "xas_"
+
+
+def _resolve_prefixed(values: dict) -> dict:
+    """Flatten a shared input file for this spectroscopy.
+
+    One input file describes one material and may serve both `run_xas.py` and
+    `run_xps.py`. Settings that differ between the two carry an `xas_` or
+    `xps_` prefix; a prefixed key wins over the bare one, so anything the two
+    calculations agree on only needs to be written once.
+    """
+    resolved = dict(values)
+    for key, value in values.items():
+        if key.startswith(_PREFIX):
+            resolved[key[len(_PREFIX) :]] = value
+    return resolved
+
+
+def _load_input_file(input_file=None) -> None:
+    path = Path(INPUT_FILE if input_file is None else input_file)
     if not path.is_absolute():
         path = ROOT / path
     if not path.exists():
         raise FileNotFoundError(f"input file not found: {path}")
 
-    values = runpy.run_path(
-        str(path),
-        init_globals={
-            "ROOT": ROOT,
-            "Path": Path,
-        },
+    values = _resolve_prefixed(
+        runpy.run_path(
+            str(path),
+            init_globals={
+                "ROOT": ROOT,
+                "Path": Path,
+            },
+        )
     )
     missing = sorted(key for key in _INPUT_KEYS if key not in values)
     if missing:

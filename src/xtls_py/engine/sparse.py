@@ -133,8 +133,18 @@ def diagonal_sparse(values):
     return sparse.diags(np.asarray(values), format="csr")
 
 
-def lowest_eigenpairs(matrix, k: int = 6):
-    """Return the lowest eigenpairs for dense or sparse Hermitian matrices."""
+def lowest_eigenpairs(matrix, k: int = 6, seed: int = 0):
+    """Return the lowest eigenpairs for dense or sparse Hermitian matrices.
+
+    ARPACK picks a random starting vector unless one is supplied, which makes
+    repeated runs disagree inside degenerate subspaces: the eigenvalues are
+    reproducible but the basis chosen for a degenerate multiplet is not. Any
+    quantity that is not a subspace invariant -- a per-state spin projection,
+    a spin-resolved channel -- then wobbles between runs. Fixing the starting
+    vector makes the whole calculation reproducible. Note this only pins the
+    choice down; inside a degenerate subspace no single basis is more correct
+    than another.
+    """
     if k <= 0:
         raise ValueError("k must be positive")
     n = matrix.shape[0]
@@ -146,7 +156,8 @@ def lowest_eigenpairs(matrix, k: int = 6):
     except ImportError:
         values, vectors = np.linalg.eigh(matrix.toarray() if hasattr(matrix, "toarray") else matrix)
         return values[:k], vectors[:, :k]
-    values, vectors = eigsh(matrix, k=k, which="SA")
+    start_vector = np.random.default_rng(seed).standard_normal(n)
+    values, vectors = eigsh(matrix, k=k, which="SA", v0=start_vector)
     order = np.argsort(values)
     return values[order], vectors[:, order]
 
