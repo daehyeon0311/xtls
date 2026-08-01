@@ -25,9 +25,19 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-ALPHA_C = 6.35          # critical D/J, from the XLD paper (1.65 / 0.26)
-J_NEUTRON = 0.26        # meV, Do et al.
-J_DFT_U3 = 0.2329       # meV, this work at U = 3 eV
+# Conventions. Do et al. (Nat. Commun. 12, 5331) quote an effective S = 1
+# Hamiltonian obtained by projecting out the Sz = +-2 doublet, and state the
+# mapping explicitly: J~ = 3J, D~ = D. Everything here is converted to the
+# S = 2 Hamiltonian so that DFT energies can be compared directly.
+ALPHA_C_EFFECTIVE = 0.158            # critical J~/D~ from Do et al.
+CRITICAL_D_OVER_J = 3.0 / ALPHA_C_EFFECTIVE   # = 19.0 in the S = 2 convention
+
+J_NEUTRON = 0.266 / 3.0              # meV, Do et al. converted to S = 2
+D_NEUTRON = 1.42                     # meV, D~ = D so this needs no conversion
+
+# Broken-symmetry DFT, E_FM - E_AFM = 8 J S(S+1) with the quantum convention,
+# which is what reproduces the measured exchange.
+J_DFT_U5 = 4.367 / 48.0              # meV, this work at U = 5 eV
 
 
 def load_anisotropy() -> list[dict[str, float]]:
@@ -72,20 +82,23 @@ def main() -> None:
     d_values = np.array([row["D_meV"] for row in rows])
     exchange = load_exchange()
 
-    print("D from the cluster model, J from DFT (U = 3 eV)\n")
-    print("  scenario                     J (meV)   D/J at 7.84 deg   crosses alpha_c at")
+    print("D from the cluster model, J from DFT, both in the S = 2 convention")
+    print(f"critical (D/J)_c = 3/alpha_c = {CRITICAL_D_OVER_J:.1f}\n")
+    print("  scenario                     J (meV)   D/J at 7.84 deg   crosses (D/J)_c at")
     scenarios = {
-        "neutron J, held fixed": J_NEUTRON,
-        "DFT J (U=3), held fixed": J_DFT_U3,
+        "neutron J (Do et al.)": J_NEUTRON,
+        "DFT J (U = 5 eV)": J_DFT_U5,
     }
     reference = float(np.interp(7.8353, angles, d_values))
     for label, j_value in scenarios.items():
         ratio = d_values / j_value
-        where = crossing(angles, ratio, ALPHA_C)
+        where = crossing(angles, ratio, CRITICAL_D_OVER_J)
         print(
             f"  {label:<28} {j_value:.4f}    {reference / j_value:6.2f}"
-            f"          {f'{where:.2f} deg' if where else 'not reached'}"
+            f"          {f'{where:.2f} deg' if where else 'beyond 12 deg'}"
         )
+    print(f"\n  measured D/J (Do et al.) = {D_NEUTRON / J_NEUTRON:.1f}, "
+          f"i.e. {100 * (D_NEUTRON / J_NEUTRON) / CRITICAL_D_OVER_J:.0f}% of critical")
 
     if exchange is None:
         print("\n  J(distortion) from DFT not available yet "
@@ -114,13 +127,13 @@ def plot(angles, d_values, scenarios, reference) -> None:
 
     for (label, j_value), style in zip(scenarios.items(), ["-", "--"]):
         axes[1].plot(angles, d_values / j_value, style, lw=1.6, label=label)
-    axes[1].axhline(ALPHA_C, color="0.4", ls=":", lw=1.2)
-    axes[1].text(angles[0] + 0.1, ALPHA_C * 1.02, r"$\alpha_c$", fontsize=9, color="0.3")
+    axes[1].axhline(CRITICAL_D_OVER_J, color="0.4", ls=":", lw=1.2)
+    axes[1].text(angles[0] + 0.1, CRITICAL_D_OVER_J * 1.01, r"$(D/J)_c$", fontsize=9, color="0.3")
     axes[1].axvline(7.8353, color="0.6", ls=":", lw=1.0)
     axes[1].set_ylabel("$D/J$")
     axes[1].legend(frameon=False, fontsize=8)
-    axes[1].text(angles[0] + 0.1, ALPHA_C * 1.25, "quantum paramagnet", fontsize=8, color="0.35")
-    axes[1].text(angles[0] + 0.1, ALPHA_C * 0.72, "antiferromagnet", fontsize=8, color="0.35")
+    axes[1].text(angles[0] + 0.1, CRITICAL_D_OVER_J * 1.04, "quantum paramagnet", fontsize=8, color="0.35")
+    axes[1].text(angles[0] + 0.1, CRITICAL_D_OVER_J * 0.80, "antiferromagnet", fontsize=8, color="0.35")
 
     for axis in axes:
         axis.set_xlabel(r"distortion angle $\Delta\theta$ (deg)")
