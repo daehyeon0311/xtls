@@ -165,6 +165,38 @@ def write_pw_input(
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def distort(sites: dict[str, list[np.ndarray]], delta_theta_deg: float, bond_length: float):
+    """Reshape the FeO4 tetrahedron to a given distortion, leaving the cell fixed.
+
+    Only the four O3 sites coordinating Fe move, and each keeps its azimuth
+    while its polar angle and radius are set to the requested values. This is
+    the same deformation the cluster model applies, so D(distortion) and
+    J(distortion) refer to identical structures and can be compared directly.
+    Si-O bonds are left to distort, which is the same approximation the cluster
+    model makes by treating FeO4 in isolation.
+    """
+    cell = np.diag([LATTICE_A, LATTICE_A, LATTICE_C])
+    inverse = np.linalg.inv(cell)
+    theta = np.radians(54.7356 + delta_theta_deg)
+    moved = {label: [site.copy() for site in positions] for label, positions in sites.items()}
+
+    for iron in sites["Fe"]:
+        for index, site in enumerate(sites["O3"]):
+            for shift in itertools.product([-1, 0, 1], repeat=3):
+                vector = (site + np.array(shift) - iron) @ cell
+                if np.linalg.norm(vector) > 2.4:
+                    continue
+                azimuth = np.arctan2(vector[1], vector[0])
+                sign = 1.0 if vector[2] >= 0 else -1.0
+                rebuilt = np.array([
+                    bond_length * np.sin(theta) * np.cos(azimuth),
+                    bond_length * np.sin(theta) * np.sin(azimuth),
+                    sign * bond_length * np.cos(theta),
+                ])
+                moved["O3"][index] = np.mod(iron + rebuilt @ inverse - np.array(shift), 1.0)
+    return moved
+
+
 def write_relax_input(
     path: Path,
     sites: dict[str, list[np.ndarray]],
@@ -266,13 +298,25 @@ def main() -> None:
         write_pw_input(HERE / f"scf_fm_{suffix}.in", sites, antiferromagnetic=False, hubbard_u=hubbard_u)
         write_pw_input(HERE / f"scf_afm_{suffix}.in", sites, antiferromagnetic=True, hubbard_u=hubbard_u)
 
-    # Strain the c axis and let the ions relax, to replace the assumed Poisson
-    # ratio with a computed one. U = 3 eV is used here rather than 4: the
-    # measured antiferromagnetic order requires J > D/alpha_c = 0.228 meV, and
-    # the computed J(U) only clears that below about 3.1 eV.
-    for strain in (-0.04, -0.02, 0.0, 0.02, 0.04):
-        suffix = f"c{strain:+.3f}".replace(".", "p").replace("+", "p").replace("-", "m")
-        write_relax_input(HERE / f"relax_{suffix}.in", sites, strain_c=strain, hubbard_u=3.0)
+    # J(distortion): reshape FeO4 exactly as the cluster model does, then run
+    # fixed-geometry scf pairs. U = 5 eV, which reproduces the measured J to
+    # 2.6% once the S=1/S=2 convention is accounted for.
+    # Same theta-R relation the cluster model uses: a straight line through the
+    # two measured structures, pinned at BFSO.
+    bfso_angle, bfso_bond = 7.8353, 1.99626
+    sfso_angle, sfso_bond = 4.8600, 1.96900
+    slope = (bfso_bond - sfso_bond) / (bfso_angle - sfso_angle)
+
+    for angle in (4.0, 12.0):
+        bond = bfso_bond + slope * (angle - bfso_angle)
+        shifted = distort(sites, angle, bond)
+        neighbours = coordination(shifted)
+        realised = float(np.degrees(np.arccos(abs(neighbours[0][2][2]) / neighbours[0][0])))
+        print(f"   distortion {angle:5.2f} deg -> realised {realised - 54.7356:.3f} deg, "
+              f"Fe-O {neighbours[0][0]:.4f} A")
+        suffix = f"th{angle:g}".replace(".", "p")
+        write_pw_input(HERE / f"scf_fm_{suffix}.in", shifted, antiferromagnetic=False, hubbard_u=5.0)
+        write_pw_input(HERE / f"scf_afm_{suffix}.in", shifted, antiferromagnetic=True, hubbard_u=5.0)
     payload = {
         "a": LATTICE_A,
         "c": LATTICE_C,

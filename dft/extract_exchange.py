@@ -26,11 +26,12 @@ RY_MEV = 13605.693122994
 SPIN = 2.0
 BONDS_FACTOR = 8.0  # E_FM - E_AFM = 8 J S^2
 
+# Do et al. quote an effective S = 1 model and give the mapping under their
+# Eq. (2): J~ = 3J, D~ = D. Everything below is in the S = 2 convention.
 LITERATURE = {
-    "neutron (Do et al.)": 0.26,
-    "Monte Carlo (Jang et al.)": 0.14,
+    "neutron (Do et al.)": 0.266 / 3.0,
 }
-ALPHA_C = 6.35  # critical D/J quoted in the XLD paper (1.65 / 0.26)
+ALPHA_C = 3.0 / 0.158  # = 19.0, critical D/J in the S = 2 convention
 D_CLUSTER = 1.45  # our calibrated D for BFSO, in meV
 
 
@@ -63,6 +64,65 @@ def magnetisation(text: str | None) -> tuple[float, float] | None:
     return float(total[-1]), float(absolute[-1])
 
 
+# Distortion series: the tag of each fixed-geometry run and the angle it
+# realises. The 8.225 deg entry is the experimental structure, already run as
+# part of the U scan.
+DISTORTION_RUNS = [("th4", 4.000), ("u5", 8.225), ("th12", 12.000)]
+
+
+def exchange_vs_distortion() -> list[dict[str, float]]:
+    """J at each distortion angle, all at U = 5 eV.
+
+    Reported with the quantum S(S+1) convention, which is what matches the
+    measured exchange once Do et al.'s effective S = 1 parameters are converted
+    back with J~ = 3J.
+    """
+    rows = []
+    for tag, angle in DISTORTION_RUNS:
+        e_fm = total_energy(wsl_read(f"scf_fm_{tag}.out"))
+        e_afm = total_energy(wsl_read(f"scf_afm_{tag}.out"))
+        if e_fm is None or e_afm is None:
+            rows.append({"delta_theta_deg": angle, "status": "pending"})
+            continue
+        difference = (e_fm - e_afm) * RY_MEV
+        rows.append(
+            {
+                "delta_theta_deg": angle,
+                "status": "done",
+                "dE_meV": difference,
+                "J_meV": difference / (BONDS_FACTOR * SPIN * (SPIN + 1)),
+            }
+        )
+    return rows
+
+
+def report_distortion() -> None:
+    rows = exchange_vs_distortion()
+    done = [row for row in rows if row["status"] == "done"]
+    print()
+    print("J against distortion (U = 5 eV, quantum convention)")
+    print("  delta theta   dE (meV)   J (meV)")
+    for row in rows:
+        if row["status"] != "done":
+            print(f"  {row['delta_theta_deg']:8.3f}      -- pending --")
+            continue
+        print(f"  {row['delta_theta_deg']:8.3f}   {row['dE_meV']:+8.3f}   {row['J_meV']:.4f}")
+
+    if len(done) >= 2:
+        first, last = done[0], done[-1]
+        span = last["delta_theta_deg"] - first["delta_theta_deg"]
+        change = 100.0 * (last["J_meV"] / first["J_meV"] - 1.0) if first["J_meV"] else float("nan")
+        print(f"\n  dJ/d(theta) = {(last['J_meV'] - first['J_meV']) / span:+.5f} meV/deg")
+        print(f"  J changes by {change:+.1f}% from {first['delta_theta_deg']:.1f} "
+              f"to {last['delta_theta_deg']:.1f} deg")
+        print("\n  The XLD paper assumed this variation was negligible.")
+        payload = {f"{row['delta_theta_deg']:.3f}": row["J_meV"] for row in done}
+        (HERE / "exchange_vs_distortion.json").write_text(
+            __import__("json").dumps(payload, indent=1), encoding="utf-8"
+        )
+        print(f"  wrote {HERE / 'exchange_vs_distortion.json'}")
+
+
 def main() -> None:
     rows = []
     for hubbard_u in (3.0, 4.0, 5.0, 6.0):
@@ -93,12 +153,12 @@ def main() -> None:
         if row["status"] != "done":
             print(f"  {row['U']:5.1f}   {'-- pending --':^47}")
             continue
-        ratio = D_CLUSTER / row["J_meV"] if row["J_meV"] else float("nan")
+        ratio = D_CLUSTER / row["J_quantum_meV"] if row["J_quantum_meV"] else float("nan")
         state = "AFM" if row["dE_meV"] > 0 else "FM"
         verdict = "QPM predicted" if ratio > ALPHA_C else "AFM, below critical"
         print(
             f"  {row['U']:5.1f}   {row['E_FM']:.8f}  {row['E_AFM']:.8f}  "
-            f"{row['dE_meV']:+8.3f}   {row['J_meV']:6.4f}   {ratio:5.2f}  {state}, {verdict}"
+            f"{row['dE_meV']:+8.3f}   {row['J_quantum_meV']:6.4f}   {ratio:5.2f}  {state}, {verdict}"
         )
 
     done = [row for row in rows if row["status"] == "done"]
@@ -108,14 +168,14 @@ def main() -> None:
         for label, value in LITERATURE.items():
             print(f"  {label:<28} J = {value:.3f} meV")
         print()
-        slope = (done[-1]["J_meV"] - done[0]["J_meV"]) / (done[-1]["U"] - done[0]["U"])
+        slope = (done[-1]["J_quantum_meV"] - done[0]["J_quantum_meV"]) / (done[-1]["U"] - done[0]["U"])
         print(f"  dJ/dU = {slope:+.4f} meV/eV")
         for label, target in LITERATURE.items():
             if abs(slope) > 1e-9:
-                implied = done[0]["U"] + (target - done[0]["J_meV"]) / slope
+                implied = done[0]["U"] + (target - done[0]["J_quantum_meV"]) / slope
                 print(f"  U reproducing {label:<28} = {implied:5.2f} eV")
         print()
-        print(f"  critical ratio alpha_c = {ALPHA_C:.2f}, our D = {D_CLUSTER:.2f} meV")
+        print(f"  critical (D/J)_c = {ALPHA_C:.1f} (S=2 convention), our D = {D_CLUSTER:.2f} meV")
         print(f"  -> J must exceed {D_CLUSTER / ALPHA_C:.3f} meV for an ordered ground state")
 
     if any(row["status"] == "done" and row["mag_fm"] for row in done):
@@ -126,6 +186,8 @@ def main() -> None:
                 f"  U={row['U']:.0f}  FM total {row['mag_fm'][0]:+.2f} abs {row['mag_fm'][1]:.2f}"
                 f"   |  AFM total {row['mag_afm'][0]:+.2f} abs {row['mag_afm'][1]:.2f}"
             )
+
+    report_distortion()
 
 
 if __name__ == "__main__":
