@@ -55,12 +55,19 @@ def load_anisotropy() -> list[dict[str, float]]:
 
 
 def load_exchange() -> dict[float, float] | None:
-    """J(distortion) from DFT, if the strained relaxations have been analysed."""
-    path = Path(__file__).resolve().parent / "exchange_vs_strain.json"
+    """J(distortion) from DFT, keyed by distortion angle in degrees."""
+    path = Path(__file__).resolve().parent / "exchange_vs_distortion.json"
     if not path.exists():
         return None
     payload = json.loads(path.read_text(encoding="utf-8"))
     return {float(k): float(v) for k, v in payload.items()}
+
+
+def interpolate_exchange(angles: np.ndarray, exchange: dict[float, float]) -> np.ndarray:
+    """J across the scan, linearly through the computed distortion points."""
+    known_angles = np.array(sorted(exchange))
+    known_values = np.array([exchange[a] for a in known_angles])
+    return np.interp(angles, known_angles, known_values)
 
 
 def crossing(angles, values, target: float) -> float | None:
@@ -100,20 +107,32 @@ def main() -> None:
     print(f"\n  measured D/J (Do et al.) = {D_NEUTRON / J_NEUTRON:.1f}, "
           f"i.e. {100 * (D_NEUTRON / J_NEUTRON) / CRITICAL_D_OVER_J:.0f}% of critical")
 
+    varying = None
     if exchange is None:
         print("\n  J(distortion) from DFT not available yet "
-              "(dft/exchange_vs_strain.json missing).")
-        print("  Holding J fixed is the paper's own assumption; the strained-cell")
-        print("  relaxations are what replace it.")
+              "(dft/exchange_vs_distortion.json missing).")
+        print("  Holding J fixed is the paper's own assumption.")
     else:
-        print("\n  J(distortion) from DFT:")
-        for strain, j_value in sorted(exchange.items()):
-            print(f"    strain {strain:+.3f}  J = {j_value:.4f} meV")
+        print("\n  J(distortion) from DFT (U = 5 eV):")
+        for angle, j_value in sorted(exchange.items()):
+            print(f"    {angle:6.3f} deg   J = {j_value:.4f} meV")
+        varying = interpolate_exchange(angles, exchange)
+        ratio = d_values / varying
+        where = crossing(angles, ratio, CRITICAL_D_OVER_J)
+        span = sorted(exchange)
+        change = 100.0 * (exchange[span[-1]] / exchange[span[0]] - 1.0)
+        print(f"\n  J varies by {change:+.1f}% over the scan, which the paper assumed away.")
+        print(f"  With J(distortion) included, D/J crosses the critical ratio at "
+              f"{f'{where:.2f} deg' if where else 'beyond the scan'}.")
+        fixed = crossing(angles, d_values / J_DFT_U5, CRITICAL_D_OVER_J)
+        if where and fixed:
+            print(f"  Holding J fixed at its BFSO value would give {fixed:.2f} deg, "
+                  f"a shift of {where - fixed:+.2f} deg.")
 
-    plot(angles, d_values, scenarios, reference)
+    plot(angles, d_values, scenarios, reference, varying)
 
 
-def plot(angles, d_values, scenarios, reference) -> None:
+def plot(angles, d_values, scenarios, reference, varying=None) -> None:
     try:
         import matplotlib.pyplot as plt
     except ImportError:
@@ -126,7 +145,10 @@ def plot(angles, d_values, scenarios, reference) -> None:
     axes[0].text(7.95, d_values.min(), "BFSO", fontsize=8, color="0.35")
 
     for (label, j_value), style in zip(scenarios.items(), ["-", "--"]):
-        axes[1].plot(angles, d_values / j_value, style, lw=1.6, label=label)
+        axes[1].plot(angles, d_values / j_value, style, lw=1.2, alpha=0.7, label=f"{label}, J fixed")
+    if varying is not None:
+        axes[1].plot(angles, d_values / varying, "-", lw=2.0, color="black",
+                     label="DFT $J(\\Delta\\theta)$")
     axes[1].axhline(CRITICAL_D_OVER_J, color="0.4", ls=":", lw=1.2)
     axes[1].text(angles[0] + 0.1, CRITICAL_D_OVER_J * 1.01, r"$(D/J)_c$", fontsize=9, color="0.3")
     axes[1].axvline(7.8353, color="0.6", ls=":", lw=1.0)
