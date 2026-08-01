@@ -165,6 +165,74 @@ def write_pw_input(
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def write_relax_input(
+    path: Path,
+    sites: dict[str, list[np.ndarray]],
+    *,
+    strain_c: float,
+    hubbard_u: float = 4.0,
+) -> None:
+    """Relax the internal coordinates at a fixed, strained cell.
+
+    Straining c and letting the ions settle is what actually answers the
+    paper's open question. It replaces the assumed Poisson ratio with a
+    computed response, and each relaxed structure then gives both its own
+    distortion angle and, through a pair of fixed-spin runs, its own J.
+    """
+    tag = f"relax_c{strain_c:+.3f}".replace(".", "p").replace("+", "p").replace("-", "m")
+    scaled_c = LATTICE_C * (1.0 + strain_c)
+    lines = [
+        "&CONTROL",
+        "  calculation = 'relax'",
+        f"  prefix = '{tag}'",
+        "  outdir = './tmp'",
+        "  pseudo_dir = './pseudo'",
+        "  forc_conv_thr = 1.0d-4",
+        "  nstep = 100",
+        "/",
+        "&SYSTEM",
+        "  ibrav = 6",
+        f"  celldm(1) = {LATTICE_A / 0.529177210903:.8f}",
+        f"  celldm(3) = {scaled_c / LATTICE_A:.8f}",
+        "  nat = 24",
+        "  ntyp = 4",
+        "  ecutwfc = 60.0",
+        "  ecutrho = 480.0",
+        "  occupations = 'smearing'",
+        "  smearing = 'gaussian'",
+        "  degauss = 0.01",
+        "  nspin = 2",
+        "  starting_magnetization(2) = 0.5",
+        "/",
+        "&ELECTRONS",
+        "  conv_thr = 1.0d-7",
+        "  mixing_beta = 0.3",
+        "  electron_maxstep = 200",
+        "/",
+        "&IONS",
+        "  ion_dynamics = 'bfgs'",
+        "/",
+        "ATOMIC_SPECIES",
+        "  Ba 137.327  Ba.pbe-spn-kjpaw_psl.1.0.0.UPF",
+        "  Fe1 55.845  Fe.pbe-spn-kjpaw_psl.0.2.1.UPF",
+        "  Si 28.0855  Si.pbe-n-kjpaw_psl.1.0.0.UPF",
+        "  O  15.999   O.pbe-n-kjpaw_psl.1.0.0.UPF",
+        "",
+        "ATOMIC_POSITIONS crystal",
+    ]
+    for site in sites["Fe"]:
+        lines.append("  %-3s %.6f %.6f %.6f" % ("Fe1", *site))
+    for label in ("Ba", "Si"):
+        for site in sites[label]:
+            lines.append("  %-3s %.6f %.6f %.6f" % (label, *site))
+    for label in ("O1", "O2", "O3"):
+        for site in sites[label]:
+            lines.append("  %-3s %.6f %.6f %.6f" % ("O", *site))
+    lines += ["", "K_POINTS automatic", "  3 3 4 0 0 0", ""]
+    lines += ["HUBBARD (ortho-atomic)", f"U Fe1-3d {hubbard_u}", ""]
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def main() -> None:
     sites = build()
     counts = {label: len(positions) for label, positions in sites.items()}
@@ -197,6 +265,14 @@ def main() -> None:
         suffix = f"u{hubbard_u:g}".replace(".", "p")
         write_pw_input(HERE / f"scf_fm_{suffix}.in", sites, antiferromagnetic=False, hubbard_u=hubbard_u)
         write_pw_input(HERE / f"scf_afm_{suffix}.in", sites, antiferromagnetic=True, hubbard_u=hubbard_u)
+
+    # Strain the c axis and let the ions relax, to replace the assumed Poisson
+    # ratio with a computed one. U = 3 eV is used here rather than 4: the
+    # measured antiferromagnetic order requires J > D/alpha_c = 0.228 meV, and
+    # the computed J(U) only clears that below about 3.1 eV.
+    for strain in (-0.04, -0.02, 0.0, 0.02, 0.04):
+        suffix = f"c{strain:+.3f}".replace(".", "p").replace("+", "p").replace("-", "m")
+        write_relax_input(HERE / f"relax_{suffix}.in", sites, strain_c=strain, hubbard_u=3.0)
     payload = {
         "a": LATTICE_A,
         "c": LATTICE_C,
