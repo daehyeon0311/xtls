@@ -5,13 +5,16 @@ import numpy as np
 from .engine.shells import spherical_to_cubic_transform
 
 
-def crystal_field(
+def _point_charge_field(
     positions_sph: np.ndarray,
-    ten_dq: float,
     r2: float,
     r4: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Return crystal-field matrices and Tanaka Qkm coefficients.
+) -> tuple[np.ndarray, np.ndarray]:
+    """Unnormalized point-charge crystal field, in the spherical basis.
+
+    Returns the matrix together with the Tanaka Qkm coefficients. The absolute
+    scale here is whatever the point-charge model gives; `crystal_field`
+    rescales it.
 
     `positions_sph` rows are `[radius, theta, phi]` in radians.
     """
@@ -135,18 +138,76 @@ def crystal_field(
     ) / 21
 
     h_cry = q0 * c0 + r2 * q2 * c2 + r4 * q4 * c4
-    e_cry = np.sort(np.real(np.linalg.eigvals(h_cry)))
-    positive_count = int(np.sum(e_cry > 0))
-    e_plus = np.sum(e_cry[5 - positive_count : 5])
-    e_minus = np.sum(e_cry[: 5 - positive_count])
-    dq = e_plus / positive_count - e_minus / (5 - positive_count)
-    norm = ten_dq / dq
-    h_cry = norm * h_cry
-    e_cry = norm * e_cry
+    return h_cry, qkm
 
+
+def t2_e_splitting(h_spherical: np.ndarray) -> float:
+    """Separation between the t2 and e orbital groups, in the field's own units.
+
+    The groups are identified by their cubic symmetry labels -- (xy, yz, zx)
+    against (x2-y2, 3z2-r2) -- rather than by the sign of their energies.
+    Sorting by sign breaks down under a large distortion: a level crossing zero
+    moves between groups and makes the splitting, and any normalization built
+    on it, jump discontinuously.
+
+    Positive for octahedral coordination, negative for tetrahedral.
+    """
+    transform = spherical_to_cubic_transform()
+    diagonal = np.real(np.diag(transform @ h_spherical @ transform.conjugate().T))
+    return float(np.mean(diagonal[3:]) - np.mean(diagonal[:3]))
+
+
+def reference_scale(
+    positions_sph: np.ndarray,
+    ten_dq: float,
+    r2: float,
+    r4: float,
+) -> float:
+    """Factor that scales this geometry's point-charge field to `ten_dq`.
+
+    Pass the result back to `crystal_field` as `scale` to hold the calibration
+    fixed while the geometry changes. That is what a distortion scan needs: the
+    point-charge model already determines how the field varies with the ligand
+    positions, and renormalizing at every step would throw that variation away,
+    leaving only the change in shape.
+    """
+    h_raw, _qkm = _point_charge_field(positions_sph, r2, r4)
+    splitting = t2_e_splitting(h_raw)
+    if abs(splitting) < 1e-12:
+        raise ValueError("this geometry has no t2-e splitting to calibrate against")
+    return ten_dq / abs(splitting)
+
+
+def crystal_field(
+    positions_sph: np.ndarray,
+    ten_dq: float,
+    r2: float,
+    r4: float,
+    scale: float | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Return crystal-field matrices and Tanaka Qkm coefficients.
+
+    `positions_sph` rows are `[radius, theta, phi]` in radians.
+
+    By default the field is normalized so that its t2-e splitting equals
+    `ten_dq`. Passing `scale` -- from `reference_scale` at some reference
+    structure -- uses that calibration instead and lets the absolute field
+    follow the geometry, which is what comparing distorted structures requires.
+    """
+    h_raw, qkm = _point_charge_field(positions_sph, r2, r4)
+    if scale is None:
+        splitting = t2_e_splitting(h_raw)
+        if abs(splitting) < 1e-12:
+            raise ValueError("crystal field has no t2-e splitting to normalize against")
+        # `abs` keeps the sign convention: the magnitude of the splitting is set
+        # to `ten_dq` and its sign follows the coordination.
+        scale = ten_dq / abs(splitting)
+
+    h_cry = scale * h_raw
+    e_cry = np.sort(np.real(np.linalg.eigvals(h_cry)))
     transform = spherical_to_cubic_transform()
     h_cry_xyz = transform @ h_cry @ transform.conjugate().T
-    qkm_tanaka = norm * np.vstack([qkm[0, :] * 1, qkm[1, :] * r2, qkm[2, :] * r4])
+    qkm_tanaka = scale * np.vstack([qkm[0, :] * 1, qkm[1, :] * r2, qkm[2, :] * r4])
     return h_cry_xyz, h_cry, e_cry, qkm_tanaka
 
 

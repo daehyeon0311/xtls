@@ -1,4 +1,5 @@
 {
+  "case_name": "Fe_Ba2FeSi2O7",
   "configuration_energies": [
     {
       "configuration": "2p6 3d6",
@@ -148,7 +149,8 @@
     }
   },
   "inplane_curve": "ab",
-  "input_file": "C:\\Users\\allur\\OneDrive\\codex\\xtls_python\\inputs\\Fe_Ba2FeSi2O7.py",
+  "input_file": "C:\\Users\\DH\\Documents\\XAS\\inputs\\Fe_Ba2FeSi2O7.py",
+  "ion": "Fe2+",
   "ligand_angle_offset_deg": 7.8353,
   "ligand_hole_truncation_reason": "none",
   "ligand_positions_spherical": null,
@@ -216,13 +218,13 @@
       "sigma_polarization": "E//ab; pure in-plane channel"
     },
     "final_basis_size": 6120.0,
-    "final_ground_energy": -34.31389103685925,
+    "final_ground_energy": -34.316874696839946,
     "hybridization_mode": "geometry",
     "initial_basis_size": 3435.0,
-    "initial_ground_energy": -12.51926064903643,
+    "initial_ground_energy": -12.525114594273617,
     "initial_states": 10,
     "ligand_hole_truncation_reason": "none",
-    "onset": -21.79463038782282,
+    "onset": -21.79176010256633,
     "requested_max_ligand_holes": 2
   },
   "n_analyzed_states": 10,
@@ -243,12 +245,12 @@
   "save_state_analysis": true,
   "so2p_scale": 1.0,
   "so3d_scale": 1.0,
-  "spectrum_method": "exact",
+  "spectrum_method": "lanczos",
   "temperature_kelvin": 370.0,
-  "ten_dq": 0.3,
+  "ten_dq": 0.1508,
   "u_charge_transfer": 4.25,
-  "xtls_energy_shift": 0.0,
+  "xtls_energy_shift": -4.93,
   "xtls_iso_column": "iso_broadened",
-  "xtls_path": "C:\\Users\\allur\\OneDrive\\codex\\xtls_python\\processed\\Fe_L_spectrum.txt",
+  "xtls_path": "C:\\Users\\DH\\Documents\\XAS\\data\\Fe_L_spectrum.txt",
   "xtls_scale": 1.0
 }

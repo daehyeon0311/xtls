@@ -40,7 +40,13 @@ max_ligand_holes = 2
 
 # --- Charge-transfer and crystal-field parameters --------------------------
 
-ten_dq = 0.30
+# 10Dq is defined here as the t2-e separation identified by cubic symmetry
+# labels. An earlier convention grouped the levels by the sign of their
+# energies instead, under which the same field was called 0.30 eV; the two
+# differ by a factor that depends on the distortion (2.04 at the BFSO angle),
+# so quoted values are only meaningful together with the convention. This value
+# is calibrated to reproduce D_BFSO = 1.45 meV. See RESEARCH_LOG.md.
+ten_dq = 0.1508
 delta = 5.5
 u_charge_transfer = 4.25
 core_hole_potential = 5.75
@@ -150,7 +156,11 @@ plot_ld_scale = 0.60
 
 overlay_xtls = True
 xtls_path = ROOT / "data" / "Fe_L_spectrum.txt"
-xtls_energy_shift = 0.0
+# The two codes place their energy zero differently. -4.93 eV is the offset
+# that minimizes the residual against the original XTLS iso_broadened curve;
+# with it the agreement is 5.8% RMS. Leaving it at 0 draws the overlay
+# misaligned by about 5 eV.
+xtls_energy_shift = -4.93
 xtls_scale = 1.0
 xtls_iso_column = "iso_broadened"
 
