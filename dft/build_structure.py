@@ -96,9 +96,17 @@ def write_pw_input(
     *,
     antiferromagnetic: bool,
     hubbard_u: float = 4.0,
+    label: str | None = None,
+    c_scale: float = 1.0,
 ) -> None:
-    """One scf input, with the two Fe sites either parallel or antiparallel."""
-    tag = ("afm" if antiferromagnetic else "fm") + f"_u{hubbard_u:g}".replace(".", "p")
+    """One scf input, with the two Fe sites either parallel or antiparallel.
+
+    `label` must be unique per structure. QE keys its scratch files on the
+    prefix, so two runs sharing one would collide over the saved charge
+    density and wavefunctions -- which stalls the run rather than failing it.
+    """
+    suffix = label if label is not None else f"u{hubbard_u:g}".replace(".", "p")
+    tag = ("afm" if antiferromagnetic else "fm") + "_" + suffix
     lines = [
         "&CONTROL",
         "  calculation = 'scf'",
@@ -110,7 +118,7 @@ def write_pw_input(
         "&SYSTEM",
         "  ibrav = 6",
         f"  celldm(1) = {LATTICE_A / 0.529177210903:.8f}",
-        f"  celldm(3) = {LATTICE_C / LATTICE_A:.8f}",
+        f"  celldm(3) = {LATTICE_C * c_scale / LATTICE_A:.8f}",
         "  nat = 24",
         "  ntyp = %d" % (5 if antiferromagnetic else 4),
         "  ecutwfc = 60.0",
@@ -298,35 +306,27 @@ def main() -> None:
         write_pw_input(HERE / f"scf_fm_{suffix}.in", sites, antiferromagnetic=False, hubbard_u=hubbard_u)
         write_pw_input(HERE / f"scf_afm_{suffix}.in", sites, antiferromagnetic=True, hubbard_u=hubbard_u)
 
-    # J(distortion): reshape FeO4 exactly as the cluster model does, then run
-    # fixed-geometry scf pairs. U = 5 eV, which reproduces the measured J to
-    # 2.6% once the S=1/S=2 convention is accounted for.
-    # Same theta-R relation the cluster model uses: a straight line through the
-    # two measured structures, pinned at BFSO.
-    bfso_angle, bfso_bond = 7.8353, 1.99626
-    sfso_angle, sfso_bond = 4.8600, 1.96900
-    slope = (bfso_bond - sfso_bond) / (bfso_angle - sfso_angle)
+    # J(distortion): strain the c axis and keep fractional coordinates. Moving
+    # only the oxygens breaks the Si-O bonds they also belong to -- 1.76 A at
+    # 4 deg against a normal 1.62 -- and the SCF then will not converge.
+    # Scaling c deforms every polyhedron together and keeps Si-O within its
+    # normal range. U = 5 eV, which reproduces the measured exchange.
+    o3 = np.array(REPRESENTATIVES["O3"])
+    in_plane = np.linalg.norm(o3[:2] * LATTICE_A)
+    z_reference = o3[2] * LATTICE_C
 
-    for angle in (4.0, 12.0):
-        bond = bfso_bond + slope * (angle - bfso_angle)
-        shifted = distort(sites, angle, bond)
-        neighbours = coordination(shifted)
-        realised = float(np.degrees(np.arccos(abs(neighbours[0][2][2]) / neighbours[0][0])))
-        print(f"   distortion {angle:5.2f} deg -> realised {realised - 54.7356:.3f} deg, "
-              f"Fe-O {neighbours[0][0]:.4f} A")
-        suffix = f"th{angle:g}".replace(".", "p")
-        write_pw_input(HERE / f"scf_fm_{suffix}.in", shifted, antiferromagnetic=False, hubbard_u=5.0)
-        write_pw_input(HERE / f"scf_afm_{suffix}.in", shifted, antiferromagnetic=True, hubbard_u=5.0)
-    payload = {
-        "a": LATTICE_A,
-        "c": LATTICE_C,
-        "space_group": "P-42_1m (113)",
-        "source": "Jang et al., Phys. Rev. B 104, 214434 (2021), Table II, T = 1.7 K",
-        "sites": {label: [list(map(float, site)) for site in positions] for label, positions in sites.items()},
-    }
-    (HERE / "bfso_sites.json").write_text(json.dumps(payload, indent=1), encoding="utf-8")
-    print("\nwrote scf_fm.in, scf_afm.in, bfso_sites.json")
-
+    print()
+    for target in (6.0, 10.0):
+        z_new = in_plane / np.tan(np.radians(54.7356 + target))
+        scale = z_new / z_reference
+        bond = float(np.hypot(in_plane, z_new))
+        print(f"   distortion {target:5.2f} deg -> c x {scale:.4f} = "
+              f"{LATTICE_C * scale:.4f} A, Fe-O {bond:.4f} A")
+        suffix = f"th{target:g}".replace(".", "p")
+        for afm in (False, True):
+            name = ("scf_afm_" if afm else "scf_fm_") + suffix + ".in"
+            write_pw_input(HERE / name, sites, antiferromagnetic=afm,
+                           hubbard_u=5.0, label=suffix, c_scale=scale)
 
 if __name__ == "__main__":
     main()
