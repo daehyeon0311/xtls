@@ -42,7 +42,10 @@ J_DFT_U5 = 4.367 / 48.0              # meV, this work at U = 5 eV
 
 def load_anisotropy() -> list[dict[str, float]]:
     """D(distortion) from the cluster-model scan."""
-    path = ROOT / "outputs" / "anisotropy" / "anisotropy_scan.txt"
+    # The c-axis scan, so that D and J refer to the same deformation. The
+    # Poisson-interpolated scan describes A-site substitution instead, and the
+    # two move Fe-O in opposite directions.
+    path = ROOT / "outputs" / "anisotropy" / "anisotropy_scan_caxis.txt"
     if not path.exists():
         raise SystemExit(f"run run_anisotropy.py first: {path} is missing")
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -71,16 +74,21 @@ def interpolate_exchange(angles: np.ndarray, exchange: dict[float, float]) -> np
 
 
 def crossing(angles, values, target: float) -> float | None:
-    angles, values = np.asarray(angles), np.asarray(values)
-    above = np.where(values >= target)[0]
-    if not above.size or above[0] == 0:
+    """Where the curve crosses `target`, in either direction.
+
+    D/J rises with distortion when J is held fixed but falls once J is allowed
+    to vary, so the boundary has to be found for a decreasing curve too.
+    """
+    angles, values = np.asarray(angles, dtype=float), np.asarray(values, dtype=float)
+    offset = values - target
+    sign_change = np.where(np.sign(offset[:-1]) * np.sign(offset[1:]) < 0)[0]
+    if not sign_change.size:
         return None
-    i = above[0]
-    span = values[i] - values[i - 1]
+    i = int(sign_change[0])
+    span = offset[i + 1] - offset[i]
     if abs(span) < 1e-12:
         return float(angles[i])
-    weight = (target - values[i - 1]) / span
-    return float(angles[i - 1] + weight * (angles[i] - angles[i - 1]))
+    return float(angles[i] - offset[i] * (angles[i + 1] - angles[i]) / span)
 
 
 def main() -> None:
@@ -161,7 +169,7 @@ def plot(angles, d_values, scenarios, reference, varying=None) -> None:
         axis.set_xlabel(r"distortion angle $\Delta\theta$ (deg)")
         axis.tick_params(direction="in", top=True, right=True)
     figure.tight_layout()
-    output = ROOT / "outputs" / "anisotropy" / "phase_diagram.png"
+    output = ROOT / "outputs" / "anisotropy" / "phase_diagram_caxis.png"
     output.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output, dpi=200)
     plt.close(figure)

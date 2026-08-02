@@ -90,6 +90,26 @@ def bond_length_for(
     return reference["bond_length_A"] + slope * (delta_theta_deg - reference["delta_theta_deg"])
 
 
+def c_axis_bond_length(delta_theta_deg: float) -> float:
+    """Fe-O distance under uniaxial c-axis strain at fixed a.
+
+    Scaling c with fractional coordinates held moves the apical component only,
+    so the in-plane projection of the Fe-O vector is fixed and the bond length
+    follows from the angle alone. This is the geometry of a strain experiment,
+    and it is the one the DFT exchange calculations use.
+
+    It differs in sign from `bond_length_for`, which interpolates between the
+    two measured compounds: that variation comes from A-site substitution,
+    where the a axis changes too, and there Fe-O grows with the distortion
+    instead of shrinking.
+    """
+    reference = REFERENCE_STRUCTURES[CALIBRATION_STRUCTURE]
+    theta_reference = np.radians(IDEAL_TETRAHEDRAL_ANGLE_DEG + reference["delta_theta_deg"])
+    in_plane = reference["bond_length_A"] * np.sin(theta_reference)
+    apical = in_plane / np.tan(np.radians(IDEAL_TETRAHEDRAL_ANGLE_DEG + delta_theta_deg))
+    return float(np.hypot(in_plane, apical))
+
+
 def spin_z_operator(n_orbitals: int = 26) -> np.ndarray:
     """One-body Sz over every spin-orbital of the 2p + 3d + ligand space."""
     _sx, _sy, sz = spin_matrices()
