@@ -64,13 +64,15 @@ def magnetisation(text: str | None) -> tuple[float, float] | None:
     return float(total[-1]), float(absolute[-1])
 
 
-# Distortion series: the tag of each fixed-geometry run and the angle it
+# Distortion series: the tag of each c-axis-strained run and the angle it
 # realises. The 8.225 deg entry is the experimental structure, already run as
-# part of the U scan.
-DISTORTION_RUNS = [("th4", 4.000), ("u5", 8.225), ("th12", 12.000)]
+# part of the U scan. `_fast` variants use the reduced settings that were
+# needed while parallel execution was broken; the bare tags are converged.
+DISTORTION_RUNS = [("th6", 6.000), ("u5", 8.225), ("th10", 10.000)]
+DISTORTION_RUNS_FAST = [("th6_fast", 6.000), ("ref_fast", 8.225), ("th10_fast", 10.000)]
 
 
-def exchange_vs_distortion() -> list[dict[str, float]]:
+def exchange_vs_distortion(runs=None) -> list[dict[str, float]]:
     """J at each distortion angle, all at U = 5 eV.
 
     Reported with the quantum S(S+1) convention, which is what matches the
@@ -78,7 +80,7 @@ def exchange_vs_distortion() -> list[dict[str, float]]:
     back with J~ = 3J.
     """
     rows = []
-    for tag, angle in DISTORTION_RUNS:
+    for tag, angle in (runs if runs is not None else DISTORTION_RUNS):
         e_fm = total_energy(wsl_read(f"scf_fm_{tag}.out"))
         e_afm = total_energy(wsl_read(f"scf_afm_{tag}.out"))
         if e_fm is None or e_afm is None:
@@ -97,6 +99,7 @@ def exchange_vs_distortion() -> list[dict[str, float]]:
 
 
 def report_distortion() -> None:
+    fast = [r for r in exchange_vs_distortion(DISTORTION_RUNS_FAST) if r["status"] == "done"]
     rows = exchange_vs_distortion()
     done = [row for row in rows if row["status"] == "done"]
     print()
