@@ -226,12 +226,88 @@ def main() -> None:
     import matplotlib.pyplot as plt
 
     OUTPUT.mkdir(parents=True, exist_ok=True)
+    figure_levels(plt)
     figure_geometry(plt)
     figure_exchange(plt)
     figure_family(plt)
     figure_convention(plt)
     print(f"wrote figures to {OUTPUT}")
 
+
+
+def figure_levels(plt) -> None:
+    """FeO4 geometry and the level splitting that produces D."""
+    from matplotlib.patches import Arc
+
+    figure = plt.figure(figsize=(9.8, 4.0))
+    left = figure.add_subplot(1, 2, 1)
+    right = figure.add_subplot(1, 2, 2)
+
+    # -- (a) the tetrahedron, projected on the xz plane -----------------------
+    bond, theta = 1.9875, np.radians(54.7356 + 8.225)
+    x, z = bond * np.sin(theta), bond * np.cos(theta)
+    ideal = np.radians(54.7356)
+    xi, zi = bond * np.sin(ideal), bond * np.cos(ideal)
+    for sign_x, sign_z in ((1, 1), (-1, 1), (1, -1), (-1, -1)):
+        left.plot([0, sign_x * xi], [0, sign_z * zi], color="0.78", lw=1.1,
+                  ls="--", zorder=0)
+    left.plot(xi, zi, "o", ms=8, mfc="none", mec="0.7", mew=1.1, zorder=0)
+    left.text(xi + 0.10, zi + 0.16, "ideal", fontsize=7.5, color="0.55")
+    for sign_x, sign_z in ((1, 1), (-1, 1), (1, -1), (-1, -1)):
+        left.plot([0, sign_x * x], [0, sign_z * z], color="0.35", lw=1.4, zorder=1)
+        left.plot(sign_x * x, sign_z * z, "o", ms=11, color="tab:red", zorder=2)
+    left.plot(0, 0, "o", ms=13, color="tab:blue", zorder=3)
+    left.text(0.13, 0.10, "Fe", fontsize=9, color="tab:blue")
+    left.text(x + 0.12, z, "O", fontsize=9, color="tab:red")
+    left.axvline(0, color="0.75", ls=":", lw=1.0)
+    left.annotate("", xy=(0, 1.55), xytext=(0, -1.55),
+                  arrowprops=dict(arrowstyle="<->", color="0.6", lw=0.9))
+    left.text(0.08, 1.35, "$c$", fontsize=9, color="0.45")
+    left.add_patch(Arc((0, 0), 1.5, 1.5, angle=0, theta1=90 - np.degrees(theta),
+                       theta2=90, color="tab:green", lw=1.4))
+    left.text(0.30, 0.86, r"$\theta$", fontsize=10, color="tab:green")
+    left.text(0, -1.85, r"$\Delta\theta = \theta - 54.74^\circ = 8.23^\circ$" "\n"
+              r"Fe$-$O $= 1.988\ \mathrm{\AA}$", ha="center", fontsize=8.5, color="0.3")
+    left.set_xlim(-2.4, 2.4); left.set_ylim(-2.3, 1.9)
+    left.set_aspect("equal"); left.axis("off")
+    left.set_title("compressed FeO$_4$ tetrahedron", fontsize=9)
+
+    # -- (b) level splitting, with the computed numbers -----------------------
+    stages = [
+        (0.00, 0.55, [(0.0, r"$^5D$ (25)")], "free ion"),
+        (0.85, 1.40, [(0.55, r"$^5T_2$ (15)"), (-0.55, r"$^5E$ (10)")], "$T_d$ field"),
+        (1.70, 2.25, [(0.85, r"$^5B$"), (-0.85, r"$^5A$")], "compression"),
+    ]
+    for start, stop, levels, caption in stages:
+        for height, name in levels:
+            right.plot([start, stop], [height, height], lw=2.0, color="0.25")
+            right.text(stop + 0.04, height, name, fontsize=8.5, va="center")
+        right.text((start + stop) / 2, -1.95, caption, ha="center", fontsize=8.5, color="0.4")
+    for a, b in ((0.55, 0.85), (1.40, 1.70)):
+        right.plot([a, b], [0.0, 0.55], color="0.7", lw=0.8, ls="--")
+        right.plot([a, b], [0.0, -0.55], color="0.7", lw=0.8, ls="--")
+    right.plot([1.40, 1.70], [-0.55, -0.85], color="0.7", lw=0.8, ls="--")
+    right.plot([1.40, 1.70], [-0.55, 0.85], color="0.7", lw=0.8, ls="--")
+
+    # spin-orbit split manifold, drawn to scale from the computed energies
+    base, span = -0.85, 1.30
+    for energy, label in ((0.0, "$S_z = 0$"), (1.4517, r"$S_z = \pm 1$"), (5.8269, r"$S_z = \pm 2$")):
+        height = base + span * energy / 5.8269
+        right.plot([2.60, 3.15], [height, height], lw=2.2, color="tab:blue")
+        right.text(3.30, height, f"{label}   {energy:.2f} meV", fontsize=8.5, va="center")
+        right.plot([2.25, 2.60], [-0.85, height], color="0.7", lw=0.8, ls="--")
+    right.text(2.875, -1.95, "spin$-$orbit", ha="center", fontsize=8.5, color="0.4")
+    right.annotate("", xy=(3.15, base), xytext=(3.15, base + span * 1.4517 / 5.8269),
+                   arrowprops=dict(arrowstyle="<->", color="tab:blue", lw=1.1))
+    right.text(3.06, base + span * 0.72 / 5.8269, "$D$", fontsize=9.5,
+               color="tab:blue", ha="right", va="center")
+    right.set_xlim(-0.15, 4.6); right.set_ylim(-2.2, 1.75)
+    right.axis("off")
+    right.set_title("$S = 2$ manifold, energies from this work", fontsize=9)
+
+    figure.tight_layout()
+    figure.savefig(OUTPUT / "fig_levels.png", dpi=300)
+    plt.close(figure)
 
 if __name__ == "__main__":
     main()

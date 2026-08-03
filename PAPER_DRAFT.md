@@ -126,11 +126,11 @@
 
 | Fig | 내용 | 상태 |
 |---|---|---|
-| 1 | 결정구조 + 준위 도식 (원 논문 Fig 1 갱신) | 미작성 |
+| **1** | **FeO₄ 기하 + 준위 분열** (계산값 표시) | `outputs/paper/fig_levels.png` ✓ |
 | **2** | **기하 의존성**: Fe–O와 D를 두 변형에 대해 | `outputs/paper/fig_geometry.png` ✓ |
 | **3** | **J(Δθ)와 D/J 상태도** | `outputs/paper/fig_exchange.png` ✓ |
-| 4 | 계열 스크리닝 D vs d 전자수 | `outputs/screening/family_scan.png` (수정 필요) |
-| S1 | 정규화 규약에 따른 D(Δθ) 불연속 | 미작성 |
+| **4** | **계열 스크리닝**, Kramers 구분 | `outputs/paper/fig_family.png` ✓ |
+| **S1** | **정규화 규약 불연속** | `outputs/paper/fig_convention.png` ✓ |
 | S2 | XTLS 대조 스펙트럼 | `examples/` 활용 |
 
 ---
@@ -215,7 +215,7 @@ SrTiO₃는 보수적 목표에 가깝지만 −6% 미스핏은 완화(dislocati
 
 ## 남은 작업
 
-- [ ] Fig 1 (구조 + 준위 도식) 작성
+- [x] ~~Fig 1 (기하 + 준위 도식)~~ → `outputs/paper/fig_levels.png`
 - [x] ~~Fig 4 계열 스크리닝~~ → `outputs/paper/fig_family.png`
 - [x] ~~S1 정규화 규약 그림~~ → `outputs/paper/fig_convention.png`
 - [x] ~~기판 후보 조사~~ → MgAl₂O₄(001), 위 표
