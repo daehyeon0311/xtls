@@ -134,12 +134,102 @@ def figure_exchange(plt) -> None:
     print(f"  critical crossing at {crossing:.2f} deg")
 
 
+def figure_family(plt) -> None:
+    """D across the melilite family, split by whether a QPM is possible at all."""
+    ions = [
+        {"label": "Mn$^{2+}$\nd$^5$, S=5/2", "d": 5, "D": 0.0018, "kramers": True, "note": "$^6A_1$"},
+        {"label": "Fe$^{2+}$\nd$^6$, S=2", "d": 6, "D": 1.539, "kramers": False, "note": "$^5E$"},
+        {"label": "Co$^{2+}$\nd$^7$, S=3/2", "d": 7, "D": 3.496, "kramers": True, "note": "$^4A_2$"},
+        {"label": "Ni$^{2+}$\nd$^8$, S=1", "d": 8, "D": None, "kramers": False, "note": "$^3T_1$"},
+    ]
+    figure, axis = plt.subplots(figsize=(6.2, 4.0))
+    for index, ion in enumerate(ions):
+        if ion["D"] is None:
+            axis.bar(index, 3.9, color="0.85", hatch="//", edgecolor="0.6")
+            axis.text(index, 2.0, "orbital triplet\nno spin\nHamiltonian",
+                      ha="center", va="center", fontsize=7.5, color="0.35")
+            continue
+        colour = "tab:blue" if not ion["kramers"] else "0.7"
+        axis.bar(index, ion["D"], color=colour, edgecolor="0.3", lw=0.6)
+        text = f"{ion['D']:.3f}" if ion["D"] < 0.01 else f"{ion['D']:.2f}"
+        axis.text(index, ion["D"] + 0.12, text, ha="center", fontsize=8)
+        if ion["kramers"]:
+            axis.text(index, ion["D"] / 2, "Kramers\nno QPM", ha="center", va="center",
+                      fontsize=7.5, color="0.25")
+    axis.set_xticks(range(len(ions)))
+    axis.set_xticklabels([ion["label"] for ion in ions], fontsize=8)
+    for index, ion in enumerate(ions):
+        axis.text(index, -0.30, ion["note"], ha="center", fontsize=8, color="0.4")
+    axis.set_ylabel("$D$ (meV), at the BFSO geometry")
+    axis.set_ylim(-0.45, 4.2)
+    axis.axhline(0.0, color="0.5", lw=0.8)
+    axis.set_title("only integer spin admits a non-magnetic singlet ground state", fontsize=9)
+    axis.tick_params(direction="in", right=True)
+    figure.tight_layout()
+    figure.savefig(OUTPUT / "fig_family.png", dpi=300)
+    plt.close(figure)
+
+
+def figure_convention(plt) -> None:
+    """D(distortion) under the two crystal-field normalization conventions."""
+    import run_anisotropy as anisotropy
+    import run_xas as runner
+    from xtls_py.geometry import _point_charge_field, t2_e_splitting
+
+    runner._load_input_file(runner.ROOT / "inputs" / "Fe_Ba2FeSi2O7.py")
+    runner.__dict__["n_analyzed_states"] = 8
+
+    def sign_based_splitting(matrix) -> float:
+        """The superseded convention: group levels by the sign of their energy."""
+        levels = np.sort(np.real(np.linalg.eigvals(matrix)))
+        positive = int(np.sum(levels > 0))
+        if positive in (0, 5):
+            return float("nan")
+        upper = np.sum(levels[5 - positive:]) / positive
+        lower = np.sum(levels[: 5 - positive]) / (5 - positive)
+        return abs(upper - lower)
+
+    angles = np.arange(4.0, 12.01, 0.25)
+    d_sign, d_symmetry = [], []
+    for angle in angles:
+        bond = anisotropy.bond_length_for(angle)
+        runner.__dict__["ligand_angle_offset_deg"] = float(angle)
+        runner.__dict__["ligand_radius"] = float(bond)
+        positions = runner._ligand_positions()
+        raw, _qkm = _point_charge_field(positions, runner.r2, runner.r4)
+
+        scale = runner.ten_dq / sign_based_splitting(raw)
+        levels, _sz = anisotropy.multiplet_levels(angle, bond_length_A=bond, scale=scale)
+        d_sign.append(anisotropy.fit_anisotropy(levels)["D_meV"])
+
+        scale = runner.ten_dq / abs(t2_e_splitting(raw))
+        levels, _sz = anisotropy.multiplet_levels(angle, bond_length_A=bond, scale=scale)
+        d_symmetry.append(anisotropy.fit_anisotropy(levels)["D_meV"])
+
+    figure, axis = plt.subplots(figsize=(6.2, 4.0))
+    axis.plot(angles, d_sign, lw=1.6, color="tab:red", label="grouped by sign of level energy")
+    axis.plot(angles, d_symmetry, lw=1.8, color="tab:blue", label="grouped by cubic symmetry label")
+    axis.set_xlabel(r"distortion angle $\Delta\theta$ (deg)")
+    axis.set_ylabel("$D$ (meV)")
+    axis.legend(frameon=False, fontsize=8, loc="upper left")
+    axis.set_title("crystal-field normalization: level crossings break the sign rule", fontsize=9)
+    axis.tick_params(direction="in", top=True, right=True)
+    figure.tight_layout()
+    figure.savefig(OUTPUT / "fig_convention.png", dpi=300)
+    plt.close(figure)
+    jumps = np.abs(np.diff(d_sign))
+    print(f"  sign-based convention: largest step between adjacent points "
+          f"{np.nanmax(jumps):.4f} meV, symmetry-based {np.max(np.abs(np.diff(d_symmetry))):.4f}")
+
+
 def main() -> None:
     import matplotlib.pyplot as plt
 
     OUTPUT.mkdir(parents=True, exist_ok=True)
     figure_geometry(plt)
     figure_exchange(plt)
+    figure_family(plt)
+    figure_convention(plt)
     print(f"wrote figures to {OUTPUT}")
 
 

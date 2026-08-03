@@ -216,8 +216,8 @@ SrTiO₃는 보수적 목표에 가깝지만 −6% 미스핏은 완화(dislocati
 ## 남은 작업
 
 - [ ] Fig 1 (구조 + 준위 도식) 작성
-- [ ] Fig 4 계열 스크리닝 그림 정리 (Kramers 구분 표시)
-- [ ] S1 정규화 규약 그림
+- [x] ~~Fig 4 계열 스크리닝~~ → `outputs/paper/fig_family.png`
+- [x] ~~S1 정규화 규약 그림~~ → `outputs/paper/fig_convention.png`
 - [x] ~~기판 후보 조사~~ → MgAl₂O₄(001), 위 표
 - [ ] Ba₂CoGe₂O₇ 실제 구조로 Co²⁺ 절대값 검증 (보조 주장 강화)
 - [ ] 본문 작성
